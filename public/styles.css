@@ -367,6 +367,29 @@ a {
   font-size: .8rem;
 }
 
+.view-artwork-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  margin-top: 1rem;
+  padding: 12px 18px;
+  border: 1px solid #111;
+  background: transparent;
+  color: #111;
+  cursor: pointer;
+  font: 700 .76rem/1 Arial, sans-serif;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  transition: background .2s ease, color .2s ease, border-color .2s ease;
+}
+
+.view-artwork-button:hover,
+.view-artwork-button:focus-visible {
+  background: #111;
+  color: #fff;
+}
+
 .artwork-trigger {
   display: block;
   width: 100%;

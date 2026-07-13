@@ -57,6 +57,7 @@ const lightboxClose = document.getElementById("lightbox-close");
 const lightboxPrev = document.getElementById("lightbox-prev");
 const lightboxNext = document.getElementById("lightbox-next");
 const artworkTriggers = [...document.querySelectorAll(".artwork-trigger")];
+const copyTriggers = [...document.querySelectorAll(".lightbox-copy-trigger")];
 const artworks = artworkTriggers.map((trigger) => ({
   src: trigger.dataset.lightboxSrc,
   title: trigger.dataset.lightboxTitle,
@@ -119,6 +120,15 @@ function moveLightbox(direction) {
 
 artworkTriggers.forEach((trigger, index) => {
   trigger.addEventListener("click", () => openLightbox(index));
+});
+
+copyTriggers.forEach((trigger) => {
+  trigger.addEventListener("click", () => {
+    const artworkIndex = artworks.findIndex((artwork) => artwork.src === trigger.dataset.lightboxSrc);
+    if (artworkIndex >= 0) {
+      openLightbox(artworkIndex);
+    }
+  });
 });
 
 lightboxClose.addEventListener("click", closeLightbox);
