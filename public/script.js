@@ -66,9 +66,10 @@ const artworks = artworkTriggers.map((trigger) => ({
 let lightboxIndex = 0;
 let lastFocusedElement = null;
 let resumeAutoAfterLightbox = false;
+let storedPortfolioIndex = 0;
 
 function isLightboxOpen() {
-  return !lightbox.hidden;
+  return lightbox.classList.contains("open");
 }
 
 function renderLightbox() {
@@ -80,6 +81,7 @@ function renderLightbox() {
 
 function openLightbox(index) {
   lightboxIndex = index;
+  storedPortfolioIndex = current;
   lastFocusedElement = document.activeElement;
   resumeAutoAfterLightbox = Boolean(timer);
 
@@ -89,15 +91,17 @@ function openLightbox(index) {
 
   renderLightbox();
   lightbox.hidden = false;
+  lightbox.classList.add("open");
   document.body.style.overflow = "hidden";
   lightboxClose.focus();
 }
 
 function closeLightbox() {
+  lightbox.classList.remove("open");
   lightbox.hidden = true;
   document.body.style.overflow = "";
   lightboxImage.removeAttribute("src");
-  show(current);
+  show(storedPortfolioIndex);
 
   if (resumeAutoAfterLightbox) {
     startAuto();
@@ -120,6 +124,11 @@ artworkTriggers.forEach((trigger, index) => {
 lightboxClose.addEventListener("click", closeLightbox);
 lightboxPrev.addEventListener("click", () => moveLightbox(-1));
 lightboxNext.addEventListener("click", () => moveLightbox(1));
+lightbox.addEventListener("click", (event) => {
+  if (!event.target.closest(".lightbox img, .lightbox-button")) {
+    closeLightbox();
+  }
+});
 
 document.addEventListener("keydown", (event) => {
   if (isLightboxOpen()) {
