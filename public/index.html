@@ -3,29 +3,74 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="The Galleria.Art presents curated online gallery experiences.">
+  <meta name="description" content="Beautiful online galleries for artists, photographers, creators, and collectors.">
   <title>The Galleria.Art</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="home-page">
-  <main class="home-entrance" aria-label="The Galleria.Art">
-    <div class="home-content">
-      <p class="welcome-line">WELCOME TO</p>
-      <h1><span>THE</span><span>GALLERIA.ART</span></h1>
-      <div class="gold-divider" aria-hidden="true"></div>
-      <a class="home-button" href="/CarolynElaine/">VIEW CURRENT GALLERIES</a>
+  <header class="site-header" aria-label="The Galleria.Art">
+    <a class="site-brand" href="/">The Galleria.Art</a>
+    <nav class="site-nav" aria-label="Public navigation">
+      <a href="#current-galleries">Galleries</a>
+      <a href="#featured-gallery">Featured</a>
+      <a href="#artist-login">Artist Login</a>
+    </nav>
+  </header>
 
-      <section class="current-galleries" aria-label="Current galleries">
-        <h2>Current Gallery:</h2>
-        <div class="gallery-list">
-          <article class="gallery-card">
-            <h3><a class="gallery-link" href="/CarolynElaine/">Carolyn Elaine</a></h3>
-            <p>Public Artist</p>
-            <a class="home-button gallery-button" href="/CarolynElaine/">VIEW GALLERY</a>
-          </article>
+  <main>
+    <section class="home-hero" aria-label="The Galleria.Art introduction">
+      <div class="home-hero-inner">
+        <p class="welcome-line">WELCOME TO</p>
+        <h1>THE GALLERIA.ART</h1>
+        <div class="gold-divider" aria-hidden="true"></div>
+        <p class="hero-support">Beautiful online galleries for artists, photographers, creators, and collectors.</p>
+        <div class="hero-actions">
+          <a class="home-button" href="#current-galleries">VIEW CURRENT GALLERIES</a>
+          <a class="home-button secondary" id="artist-login" href="#" aria-disabled="true">ARTIST LOGIN</a>
         </div>
-      </section>
-    </div>
+      </div>
+    </section>
+
+    <section class="directory-section" id="current-galleries" aria-labelledby="current-galleries-title">
+      <div class="section-inner">
+        <div class="section-heading">
+          <p class="section-kicker">Public Directory</p>
+          <h2 id="current-galleries-title">CURRENT GALLERIES</h2>
+        </div>
+        <label class="search-panel">
+          <span>Search</span>
+          <input id="gallery-search" type="search" placeholder="Search artists and galleries..." autocomplete="off">
+        </label>
+        <div class="gallery-list" id="gallery-list" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="featured-section" id="featured-gallery" aria-labelledby="featured-gallery-title">
+      <div class="section-inner">
+        <div class="section-heading">
+          <p class="section-kicker">Featured</p>
+          <h2 id="featured-gallery-title">FEATURED GALLERY</h2>
+        </div>
+        <div class="featured-gallery" id="featured-gallery-card"></div>
+        <div class="explore-row">
+          <button class="home-button explore-button" id="explore-gallery" type="button">EXPLORE A GALLERY</button>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <footer class="site-footer">
+    <nav aria-label="Footer navigation">
+      <a href="#">About</a>
+      <a href="#">Contact</a>
+      <a href="#">Artist Login</a>
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+    </nav>
+    <p>&copy; 2026 The Galleria.Art. All rights reserved.</p>
+  </footer>
+
+  <script src="/gallery-data.js"></script>
+  <script src="/home.js"></script>
 </body>
 </html>

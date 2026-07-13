@@ -3,14 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Carolyn Elaine — public artist creating permanent artworks that celebrate culture, community, and place.">
+  <meta name="description" content="Carolyn Elaine - public artist creating permanent artworks that celebrate culture, community, and place.">
   <title>Carolyn Elaine | The Galleria</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <main id="presentation" aria-live="polite">
     <section class="slide cover active" data-title="Cover">
-      <img src="/images/whispers-main.jpeg" alt="Whispers of Ancestral Wisdom installation in St. Elizabeth, Jamaica">
+      <button class="cover-artwork-trigger" type="button" data-lightbox-src="/images/whispers-main.jpeg" aria-label="Open Whispers of Ancestral Wisdom image">
+        <img src="/images/whispers-main.jpeg" alt="Whispers of Ancestral Wisdom installation in St. Elizabeth, Jamaica">
+      </button>
       <div class="overlay">
         <p class="kicker">The Galleria presents</p>
         <h1>Carolyn Elaine</h1>
@@ -181,6 +183,7 @@
     <figure class="lightbox-figure">
       <img id="lightbox-image" alt="">
       <figcaption id="lightbox-caption"></figcaption>
+      <div class="lightbox-counter" id="lightbox-counter" aria-live="polite"></div>
     </figure>
     <button class="lightbox-button lightbox-next" id="lightbox-next" type="button" aria-label="Next artwork">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>

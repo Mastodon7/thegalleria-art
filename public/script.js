@@ -53,10 +53,12 @@ auto.onclick = () => {
 const lightbox = document.getElementById("lightbox");
 const lightboxImage = document.getElementById("lightbox-image");
 const lightboxCaption = document.getElementById("lightbox-caption");
+const lightboxCounter = document.getElementById("lightbox-counter");
 const lightboxClose = document.getElementById("lightbox-close");
 const lightboxPrev = document.getElementById("lightbox-prev");
 const lightboxNext = document.getElementById("lightbox-next");
 const artworkTriggers = [...document.querySelectorAll(".artwork-trigger")];
+const coverArtworkTriggers = [...document.querySelectorAll(".cover-artwork-trigger")];
 const copyTriggers = [...document.querySelectorAll(".lightbox-copy-trigger")];
 const artworks = artworkTriggers.map((trigger) => ({
   src: trigger.dataset.lightboxSrc,
@@ -68,6 +70,11 @@ let lightboxIndex = 0;
 let lastFocusedElement = null;
 let resumeAutoAfterLightbox = false;
 let storedPortfolioIndex = 0;
+let touchStartX = 0;
+let touchStartY = 0;
+let pointerStartX = 0;
+let pointerStartY = 0;
+let lastPointerSwipeAt = 0;
 
 function isLightboxOpen() {
   return lightbox.classList.contains("open");
@@ -78,6 +85,7 @@ function renderLightbox() {
   lightboxImage.src = artwork.src;
   lightboxImage.alt = artwork.alt;
   lightboxCaption.textContent = artwork.title;
+  lightboxCounter.textContent = `${lightboxIndex + 1} / ${artworks.length}`;
 }
 
 function openLightbox(index) {
@@ -122,6 +130,15 @@ artworkTriggers.forEach((trigger, index) => {
   trigger.addEventListener("click", () => openLightbox(index));
 });
 
+coverArtworkTriggers.forEach((trigger) => {
+  trigger.addEventListener("click", () => {
+    const artworkIndex = artworks.findIndex((artwork) => artwork.src === trigger.dataset.lightboxSrc);
+    if (artworkIndex >= 0) {
+      openLightbox(artworkIndex);
+    }
+  });
+});
+
 copyTriggers.forEach((trigger) => {
   trigger.addEventListener("click", () => {
     const artworkIndex = artworks.findIndex((artwork) => artwork.src === trigger.dataset.lightboxSrc);
@@ -138,6 +155,46 @@ lightbox.addEventListener("click", (event) => {
   if (!event.target.closest(".lightbox img, .lightbox-button")) {
     closeLightbox();
   }
+});
+
+function handleSwipe(deltaX, deltaY) {
+  if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY)) {
+    moveLightbox(deltaX < 0 ? 1 : -1);
+  }
+}
+
+lightbox.addEventListener("touchstart", (event) => {
+  const touch = event.changedTouches[0];
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
+}, { passive: true });
+
+lightbox.addEventListener("touchend", (event) => {
+  const touch = event.changedTouches[0];
+  handleSwipe(touch.clientX - touchStartX, touch.clientY - touchStartY);
+}, { passive: true });
+
+lightbox.addEventListener("mousedown", (event) => {
+  pointerStartX = event.clientX;
+  pointerStartY = event.clientY;
+});
+
+lightbox.addEventListener("mouseup", (event) => {
+  if (Date.now() - lastPointerSwipeAt < 400) {
+    return;
+  }
+
+  handleSwipe(event.clientX - pointerStartX, event.clientY - pointerStartY);
+});
+
+lightbox.addEventListener("pointerdown", (event) => {
+  pointerStartX = event.clientX;
+  pointerStartY = event.clientY;
+});
+
+lightbox.addEventListener("pointerup", (event) => {
+  handleSwipe(event.clientX - pointerStartX, event.clientY - pointerStartY);
+  lastPointerSwipeAt = Date.now();
 });
 
 document.addEventListener("keydown", (event) => {
