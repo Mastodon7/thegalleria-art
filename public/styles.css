@@ -854,6 +854,21 @@ a {
   border-color: rgba(127, 190, 144, .48);
 }
 
+.admin-badge.status-pending_review {
+  color: #f7dfac;
+  border-color: rgba(216, 189, 116, .62);
+}
+
+.admin-badge.status-approved {
+  color: #d9eef5;
+  border-color: rgba(159, 194, 207, .56);
+}
+
+.admin-badge.status-changes_requested {
+  color: #f1b1a8;
+  border-color: rgba(205, 101, 85, .58);
+}
+
 .admin-badge.status-new {
   border-color: rgba(216, 189, 116, .62);
   color: #f8f1e6;
@@ -1291,6 +1306,98 @@ a {
 .onboarding-checklist-item.complete span {
   border-color: rgba(127, 190, 144, .48);
   color: #dbf0df;
+}
+
+.review-status-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.review-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.review-status-actions a,
+.review-status-actions button {
+  min-height: 36px;
+  padding: 9px 12px;
+  border: 1px solid rgba(185, 151, 77, .38);
+  background: rgba(185, 151, 77, .08);
+  color: #f8f1e6;
+  cursor: pointer;
+  font-size: .68rem;
+  letter-spacing: .04em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.review-status-actions button:disabled,
+.admin-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.status-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 12px;
+}
+
+.status-summary-grid article,
+.status-history-list article,
+.review-note-block {
+  padding: 14px;
+  border: 1px solid rgba(185, 151, 77, .22);
+  background: rgba(11, 10, 8, .58);
+}
+
+.status-summary-grid strong,
+.review-note-block strong {
+  display: block;
+  margin: 0 0 8px;
+  color: #f8f1e6;
+  font: 400 1.02rem/1.25 Georgia, serif;
+}
+
+.status-summary-grid span,
+.status-history-list span {
+  display: block;
+  margin-top: 6px;
+  color: #d7ccb9;
+  font-size: .82rem;
+}
+
+.review-note,
+.status-history-list p {
+  margin: 8px 0 0;
+  color: #d7ccb9;
+  line-height: 1.55;
+}
+
+.review-feedback-row td {
+  background: rgba(205, 101, 85, .08);
+}
+
+.status-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.preview-ribbon {
+  position: fixed;
+  z-index: 9998;
+  top: 14px;
+  right: 14px;
+  padding: 9px 12px;
+  border: 1px solid rgba(185, 151, 77, .48);
+  background: rgba(5, 5, 5, .86);
+  color: #f8f1e6;
+  font-size: .68rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
 .invite-shell {

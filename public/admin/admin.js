@@ -1,5 +1,5 @@
 (function () {
-  const statusOptions = ["draft", "published", "archived"];
+  const statusOptions = ["draft", "pending_review", "approved", "published", "changes_requested", "archived"];
   const invitationOptions = ["current", "invited", "pending", "accepted", "none"];
   const inquiryStatusOptions = ["new", "reviewed", "replied", "archived", "spam"];
   const state = {
@@ -10,7 +10,9 @@
     inquiries: [],
     invitations: [],
     artistAccounts: [],
-    selectedInquiryId: ""
+    statusHistory: [],
+    selectedInquiryId: "",
+    selectedReviewId: ""
   };
 
   function escapeHtml(value) {
@@ -178,6 +180,31 @@
     return invitation.token ? `${window.location.origin}/invite/${encodeURIComponent(invitation.token)}` : "";
   }
 
+  function reviewItems() {
+    return [
+      ...state.artists.map((record) => ({ type: "artist", record, artistId: record.id, title: record.name })),
+      ...state.galleries.map((record) => ({ type: "gallery", record, artistId: record.artistId, title: record.title })),
+      ...state.artwork.map((record) => ({ type: "artwork", record, artistId: record.artistId, title: record.title }))
+    ]
+      .filter((item) => ["pending_review", "changes_requested", "approved"].includes(item.record.status))
+      .sort((left, right) => String(right.record.submittedAt || right.record.updatedAt || "").localeCompare(String(left.record.submittedAt || left.record.updatedAt || "")));
+  }
+
+  function reviewItemById(id) {
+    return reviewItems().find((item) => `${item.type}:${item.record.id}` === id);
+  }
+
+  function statusHistoryFor(type, id) {
+    return state.statusHistory
+      .filter((entry) => entry.recordType === type && entry.recordId === id)
+      .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  }
+
+  function previewUrlFor(item) {
+    const artistId = item.type === "artist" ? item.record.id : item.record.artistId;
+    return `/admin/preview/artist/${encodeURIComponent(artistId)}/`;
+  }
+
   function setText(id, value) {
     const element = document.getElementById(id);
     if (element) {
@@ -303,8 +330,12 @@
     state.inquiries = content.inquiries || [];
     state.invitations = content.invitations || [];
     state.artistAccounts = content.artistAccounts || [];
+    state.statusHistory = content.statusHistory || [];
     if (state.selectedInquiryId && !state.inquiries.some((inquiry) => inquiry.id === state.selectedInquiryId)) {
       state.selectedInquiryId = "";
+    }
+    if (state.selectedReviewId && !reviewItemById(state.selectedReviewId)) {
+      state.selectedReviewId = "";
     }
   }
 
@@ -410,6 +441,8 @@
     setText("media-count", activeMedia().length);
     setText("new-inquiry-count", state.inquiries.filter((inquiry) => inquiry.status === "new").length);
     setText("inquiry-count", state.inquiries.length);
+    setText("pending-review-count", reviewItems().filter((item) => item.record.status === "pending_review").length);
+    setText("changes-requested-count", reviewItems().filter((item) => item.record.status === "changes_requested").length);
     setText("published-count", state.artists.filter((artist) => artist.status === "published").length);
 
     const recentList = document.getElementById("admin-recent-inquiries");
@@ -428,6 +461,23 @@
           </div>
         </article>
       `).join("") : '<p class="empty-state">No inquiries have been received yet.</p>';
+    }
+
+    const reviewList = document.getElementById("admin-recent-review");
+    if (reviewList) {
+      const recent = reviewItems().slice(0, 5);
+      reviewList.innerHTML = recent.length ? recent.map((item) => `
+        <article class="inquiry-card">
+          <div>
+            <h3>${escapeHtml(item.title)}</h3>
+            <p>${escapeHtml(item.type)} - ${escapeHtml(artistById(item.artistId)?.name || "")}</p>
+          </div>
+          <div>
+            ${badge(item.record.status)}
+            <a href="/admin/review/">Open</a>
+          </div>
+        </article>
+      `).join("") : '<p class="empty-state">No review submissions yet.</p>';
     }
   }
 
@@ -788,6 +838,96 @@
     }).join("") : '<tr><td colspan="8">No invitations have been created yet.</td></tr>';
   }
 
+  function renderReview() {
+    const table = document.getElementById("review-table");
+    if (!table) {
+      return;
+    }
+
+    const items = reviewItems();
+    if (!state.selectedReviewId && items[0]) {
+      state.selectedReviewId = `${items[0].type}:${items[0].record.id}`;
+    }
+
+    table.innerHTML = items.length ? items.map((item) => {
+      const id = `${item.type}:${item.record.id}`;
+      return `
+        <tr>
+          <td>${escapeHtml(item.type)}</td>
+          <td>${escapeHtml(artistById(item.artistId)?.name || "")}</td>
+          <td>${escapeHtml(item.title)}</td>
+          <td>${badge(item.record.status)}</td>
+          <td>${escapeHtml(formatDate(item.record.submittedAt || item.record.updatedAt))}</td>
+          <td><a href="${attr(previewUrlFor(item))}" target="_blank" rel="noopener">Preview</a></td>
+          <td class="admin-actions">
+            <button type="button" data-view-review="${attr(id)}">Review</button>
+          </td>
+        </tr>
+      `;
+    }).join("") : '<tr><td colspan="7">No records are waiting for review.</td></tr>';
+
+    renderReviewDetail(state.selectedReviewId);
+  }
+
+  function renderReviewDetail(id) {
+    const detail = document.getElementById("review-detail");
+    if (!detail) {
+      return;
+    }
+
+    const item = reviewItemById(id) || reviewItems()[0];
+    if (!item) {
+      detail.innerHTML = '<p class="empty-state">Select a record to review.</p>';
+      return;
+    }
+
+    state.selectedReviewId = `${item.type}:${item.record.id}`;
+    const artist = artistById(item.artistId);
+    const history = statusHistoryFor(item.type, item.record.id);
+    detail.innerHTML = `
+      <div class="inquiry-detail-grid">
+        <div class="inquiry-detail-card">
+          <p class="section-kicker">${escapeHtml(item.type)}</p>
+          <h3>${escapeHtml(item.title)}</h3>
+          <p>${escapeHtml(artist?.name || "")}</p>
+          <p>${badge(item.record.status)}</p>
+        </div>
+        <div class="inquiry-detail-card">
+          <p class="section-kicker">Preview</p>
+          <h3>Private Preview</h3>
+          <p><a href="${attr(previewUrlFor(item))}" target="_blank" rel="noopener">Open preview page</a></p>
+          <p class="admin-muted">Only logged-in admins can open this preview.</p>
+        </div>
+      </div>
+      <div class="inquiry-message-block">
+        <p class="section-kicker">Artist Notes</p>
+        <p>${escapeHtml(item.record.artistReviewNote || "No artist note was submitted.")}</p>
+      </div>
+      <form class="admin-record-form" id="review-action-form" data-review-type="${attr(item.type)}" data-review-id="${attr(item.record.id)}">
+        ${select("action", "Review Action", item.record.status === "approved" ? "published" : "approved", [
+          { value: "approved", label: "approved" },
+          { value: "published", label: "published" },
+          { value: "changes_requested", label: "changes requested" },
+          { value: "archived", label: "archived" }
+        ])}
+        ${textarea("note", "Admin Notes / Requested Changes", item.record.adminReviewNote || "")}
+      </form>
+      <div class="admin-actions">
+        <button class="admin-primary-action" type="submit" form="review-action-form">Save Review Action</button>
+      </div>
+      <div class="status-history-list">
+        <p class="section-kicker">Status History</p>
+        ${history.length ? history.map((entry) => `
+          <article>
+            <strong>${escapeHtml(entry.previousStatus || "none")} -> ${escapeHtml(entry.newStatus)}</strong>
+            <span>${escapeHtml(formatDateTime(entry.createdAt))} by ${escapeHtml(entry.changedBy)}</span>
+            ${entry.note ? `<p>${escapeHtml(entry.note)}</p>` : ""}
+          </article>
+        `).join("") : '<p class="empty-state">No status history yet.</p>'}
+      </div>
+    `;
+  }
+
   function renderAll() {
     renderDashboard();
     renderMediaOwnerSelect();
@@ -797,6 +937,7 @@
     renderMedia();
     renderInquiries();
     renderInvitations();
+    renderReview();
   }
 
   function updateFromPayload(payload) {
@@ -835,6 +976,18 @@
 
     updateFromPayload(payload);
     showMessage(payload.ok ? "success" : "error", payload.message || "Inquiry update failed.");
+  }
+
+  async function saveReviewAction(form) {
+    const type = form.dataset.reviewType;
+    const id = form.dataset.reviewId;
+    const payload = await api(`/admin/api/review/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify(formData(form))
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Review update failed.");
   }
 
   async function archiveInquiry(id) {
@@ -914,6 +1067,7 @@
       const inviteRevoke = event.target.closest("[data-revoke-invitation]");
       const inquiryView = event.target.closest("[data-view-inquiry]");
       const inquiryArchive = event.target.closest("[data-archive-inquiry]");
+      const reviewView = event.target.closest("[data-view-review]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -950,6 +1104,9 @@
       }
       if (inquiryArchive) {
         archiveInquiry(inquiryArchive.dataset.archiveInquiry);
+      }
+      if (reviewView) {
+        renderReviewDetail(reviewView.dataset.viewReview);
       }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
@@ -1021,6 +1178,12 @@
       if (inquiryForm) {
         event.preventDefault();
         saveInquiry(inquiryForm);
+      }
+
+      const reviewForm = event.target.closest("#review-action-form");
+      if (reviewForm) {
+        event.preventDefault();
+        saveReviewAction(reviewForm);
       }
     });
   }

@@ -19,6 +19,7 @@
         <a href="/admin/media/">Media</a>
         <a href="/admin/inquiries/">Inquiries</a>
         <a href="/admin/invitations/">Invitations</a>
+        <a href="/admin/review/">Review</a>
         <a href="/admin/settings/">Settings</a>
       </nav>
       <form action="/admin/logout" method="post">
@@ -59,6 +60,14 @@
         <article>
           <span id="inquiry-count">0</span>
           <p>Total Inquiries</p>
+        </article>
+        <article>
+          <span id="pending-review-count">0</span>
+          <p>Pending Review</p>
+        </article>
+        <article>
+          <span id="changes-requested-count">0</span>
+          <p>Changes Requested</p>
         </article>
         <article>
           <span id="published-count">1</span>
@@ -104,6 +113,12 @@
           <a href="/admin/invitations/">Open Invitations</a>
         </article>
         <article>
+          <p>Review</p>
+          <h2>Publishing Queue</h2>
+          <span>Approve, publish, or request changes before artist updates go live.</span>
+          <a href="/admin/review/">Open Review</a>
+        </article>
+        <article>
           <p>Settings</p>
           <h2>Account Settings</h2>
           <span>Placeholder for password changes and owner preferences.</span>
@@ -114,6 +129,11 @@
       <section class="admin-panel">
         <h2>Recent Inquiries</h2>
         <div class="inquiry-card-list" id="admin-recent-inquiries"></div>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Recent Review Submissions</h2>
+        <div class="inquiry-card-list" id="admin-recent-review"></div>
       </section>
     </main>
   </div>

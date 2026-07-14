@@ -345,6 +345,7 @@
   ],
   "media": [],
   "inquiries": [],
+  "statusHistory": [],
   "invitations": [
     {
       "id": "invitation-new-artist-demo",

@@ -6,6 +6,7 @@
     artwork: [],
     media: [],
     inquiries: [],
+    statusHistory: [],
     selectedInquiryId: ""
   };
   const inquiryStatusOptions = ["new", "reviewed", "replied", "archived"];
@@ -37,6 +38,34 @@
 
   function artworkById(id) {
     return state.artwork.find((artwork) => artwork.id === id);
+  }
+
+  function reviewRecords() {
+    return [
+      { type: "artist", record: state.artist, title: state.artist.name || "Artist profile" },
+      ...state.galleries.map((record) => ({ type: "gallery", record, title: record.title })),
+      ...state.artwork.map((record) => ({ type: "artwork", record, title: record.title }))
+    ];
+  }
+
+  function reviewRecordsByStatus(statuses) {
+    return reviewRecords().filter((item) => statuses.includes(item.record.status));
+  }
+
+  function statusHistoryFor(type, id) {
+    return state.statusHistory
+      .filter((entry) => entry.recordType === type && entry.recordId === id)
+      .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  }
+
+  function reviewButton(type, record) {
+    const disabled = ["pending_review", "approved", "archived"].includes(record.status);
+    const label = record.status === "pending_review" ? "Submitted" : record.status === "approved" ? "Approved" : "Submit";
+    return `<button type="button" data-submit-review-type="${attr(type)}" data-submit-review-id="${attr(record.id)}"${disabled ? " disabled" : ""}>${label}</button>`;
+  }
+
+  function reviewNoteHtml(record) {
+    return record.adminReviewNote ? `<p class="review-note">${escapeHtml(record.adminReviewNote)}</p>` : "";
   }
 
   function mediaVariant(item, preferred) {
@@ -238,6 +267,7 @@
     state.artwork = content.artwork || [];
     state.media = content.media || [];
     state.inquiries = content.inquiries || [];
+    state.statusHistory = content.statusHistory || [];
     if (state.selectedInquiryId && !state.inquiries.some((inquiry) => inquiry.id === state.selectedInquiryId)) {
       state.selectedInquiryId = "";
     }
@@ -322,6 +352,9 @@
   }
 
   function renderDashboard() {
+    const pending = reviewRecordsByStatus(["pending_review"]);
+    const changes = reviewRecordsByStatus(["changes_requested"]);
+    const published = reviewRecordsByStatus(["published"]);
     setText("artist-name", state.artist.name);
     setText("artist-summary", `${state.artist.professionalTitle || ""}${state.account.demo ? " - Demo account" : ""}`);
     setText("artist-gallery-count", state.galleries.length);
@@ -329,6 +362,30 @@
     setText("artist-profile-status", state.artist.status || "-");
     setText("artist-invitation-status", state.artist.invitationStatus || "-");
     setText("artist-new-inquiry-count", state.inquiries.filter((inquiry) => inquiry.status === "new").length);
+    setText("artist-pending-review-count", pending.length);
+    setText("artist-changes-requested-count", changes.length);
+    setText("artist-published-count", published.length);
+
+    const statusPanel = document.getElementById("artist-review-status");
+    if (statusPanel) {
+      const priorityItems = [...changes, ...pending, ...reviewRecordsByStatus(["approved"])].slice(0, 5);
+      statusPanel.innerHTML = `
+        <div class="review-status-actions">
+          <a href="/artist/preview/" target="_blank" rel="noopener">Private Preview</a>
+          ${reviewButton("artist", state.artist)}
+        </div>
+        ${state.artist.adminReviewNote ? `<div class="review-note-block"><strong>Profile feedback</strong>${reviewNoteHtml(state.artist)}</div>` : ""}
+        <div class="status-summary-grid">
+          ${priorityItems.length ? priorityItems.map((item) => `
+            <article>
+              <strong>${escapeHtml(item.title)}</strong>
+              <span>${escapeHtml(item.type)} ${badge(item.record.status)}</span>
+              ${reviewNoteHtml(item.record)}
+            </article>
+          `).join("") : '<p class="empty-state">No records are waiting on review changes.</p>'}
+        </div>
+      `;
+    }
 
     const inquiryList = document.getElementById("artist-recent-inquiries");
     if (inquiryList) {
@@ -367,14 +424,14 @@
       const hasHeroImage = Boolean(state.artist.heroImage);
       const hasGallery = state.galleries.length > 0;
       const hasArtwork = state.artwork.some((artwork) => artwork.image && artwork.title);
-      const canPreview = state.artist.status === "published";
+      const canPreview = Boolean(state.artist.id);
       const submitted = ["pending", "accepted", "current"].includes(state.artist.invitationStatus) && hasProfile && hasGallery && hasArtwork;
       const items = [
         { label: "Complete profile", done: hasProfile, href: "/artist/profile/" },
         { label: "Add hero image", done: hasHeroImage, href: "/artist/profile/" },
         { label: "Create first gallery", done: hasGallery, href: "/artist/galleries/" },
         { label: "Upload artwork", done: hasArtwork, href: "/artist/artwork/" },
-        { label: "Preview public page", done: canPreview, href: publicArtistUrl() },
+        { label: "Preview public page", done: canPreview, href: "/artist/preview/" },
         { label: "Submit for review", done: submitted, href: "/artist/profile/" }
       ];
 
@@ -407,6 +464,33 @@
       ${field("socialLinks", "Instagram / Social Link", (state.artist.socialLinks || []).join(", "))}
       ${textarea("shortDescription", "Short Description", state.artist.shortDescription)}
       ${textarea("bio", "Long Bio / Artist Statement", state.artist.bio)}
+    `;
+  }
+
+  function renderProfileReview() {
+    const panel = document.getElementById("artist-profile-review");
+    if (!panel) {
+      return;
+    }
+
+    const history = statusHistoryFor("artist", state.artist.id);
+    panel.innerHTML = `
+      <div class="review-status-actions">
+        ${badge(state.artist.status || "draft")}
+        <a href="/artist/preview/" target="_blank" rel="noopener">Private Preview</a>
+        ${reviewButton("artist", state.artist)}
+      </div>
+      ${state.artist.adminReviewNote ? `<div class="review-note-block"><strong>Admin feedback</strong>${reviewNoteHtml(state.artist)}</div>` : ""}
+      <div class="status-history-list">
+        <p class="section-kicker">Status History</p>
+        ${history.length ? history.map((entry) => `
+          <article>
+            <strong>${escapeHtml(entry.previousStatus || "none")} -> ${escapeHtml(entry.newStatus)}</strong>
+            <span>${escapeHtml(formatDateTime(entry.createdAt))} by ${escapeHtml(entry.changedBy)}</span>
+            ${entry.note ? `<p>${escapeHtml(entry.note)}</p>` : ""}
+          </article>
+        `).join("") : '<p class="empty-state">No status history yet.</p>'}
+      </div>
     `;
   }
 
@@ -445,8 +529,14 @@
           <td>${gallery.status === "published" ? `<a href="${publicArtistUrl()}">${publicArtistUrl()}</a>` : "Not public"}</td>
           <td class="admin-actions">
             <button type="button" data-artist-edit-gallery="${attr(gallery.id)}">Edit</button>
+            ${reviewButton("gallery", gallery)}
           </td>
         </tr>
+        ${gallery.adminReviewNote ? `
+          <tr class="review-feedback-row">
+            <td colspan="7">${reviewNoteHtml(gallery)}</td>
+          </tr>
+        ` : ""}
       `;
     }).join("");
 
@@ -490,8 +580,14 @@
         <td>${escapeHtml(artwork.displayOrder)}</td>
         <td class="admin-actions">
           <button type="button" data-artist-edit-artwork="${attr(artwork.id)}">Edit</button>
+          ${reviewButton("artwork", artwork)}
         </td>
       </tr>
+      ${artwork.adminReviewNote ? `
+        <tr class="review-feedback-row">
+          <td colspan="6">${reviewNoteHtml(artwork)}</td>
+        </tr>
+      ` : ""}
     `).join("");
 
     renderArtworkForm();
@@ -598,6 +694,7 @@
   function renderAll() {
     renderDashboard();
     renderProfileForm();
+    renderProfileReview();
     renderGalleries();
     renderArtwork();
     renderMedia();
@@ -667,11 +764,25 @@
     showMessage(payload.ok ? "success" : "error", payload.message || "Inquiry update failed.");
   }
 
+  async function submitForReview(type, id) {
+    const note = window.prompt("Optional note for the admin", "") || "";
+    const payload = await api(`/artist/api/review/${encodeURIComponent(type)}/${encodeURIComponent(id)}/submit`, {
+      method: "POST",
+      body: JSON.stringify({ note })
+    });
+    if (payload.content) {
+      applyContent(payload.content);
+      renderAll();
+    }
+    showMessage(payload.ok ? "success" : "error", payload.message || "Submit for review failed.");
+  }
+
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const galleryEdit = event.target.closest("[data-artist-edit-gallery]");
       const artworkEdit = event.target.closest("[data-artist-edit-artwork]");
       const inquiryView = event.target.closest("[data-artist-view-inquiry]");
+      const reviewSubmit = event.target.closest("[data-submit-review-type]");
 
       if (galleryEdit) {
         renderGalleryForm(state.galleries.find((gallery) => gallery.id === galleryEdit.dataset.artistEditGallery));
@@ -683,6 +794,10 @@
 
       if (inquiryView) {
         renderInquiryDetail(inquiryView.dataset.artistViewInquiry);
+      }
+
+      if (reviewSubmit) {
+        submitForReview(reviewSubmit.dataset.submitReviewType, reviewSubmit.dataset.submitReviewId);
       }
     });
 

@@ -24,7 +24,8 @@ const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toStr
 const adminSessionCookieName = "galleria_admin";
 const artistSessionCookieName = "galleria_artist";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
-const validStatuses = new Set(["draft", "published", "archived"]);
+const workflowStatuses = ["draft", "pending_review", "approved", "published", "changes_requested", "archived"];
+const validStatuses = new Set(workflowStatuses);
 const validInvitationStatuses = new Set(["current", "invited", "pending", "accepted", "none"]);
 const validInquiryStatuses = new Set(["new", "reviewed", "replied", "archived", "spam"]);
 const validArtistInvitationStatuses = new Set(["pending", "accepted", "expired", "revoked"]);
@@ -190,6 +191,7 @@ function normalizeContent(content) {
     media: Array.isArray(content.media) ? content.media : [],
     inquiries: Array.isArray(content.inquiries) ? content.inquiries : [],
     invitations: Array.isArray(content.invitations) ? content.invitations : [],
+    statusHistory: Array.isArray(content.statusHistory) ? content.statusHistory : [],
     artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : []
   };
 }
@@ -219,7 +221,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "galleries", "artwork", "media", "inquiries", "invitations", "artistAccounts"].forEach((collection) => {
+  ["artists", "galleries", "artwork", "media", "inquiries", "invitations", "statusHistory", "artistAccounts"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -335,23 +337,38 @@ function readyMediaForSelect(media) {
   return media.status === "ready" || (!media.status && media.publicPath);
 }
 
+function publicRecord(record) {
+  const {
+    adminReviewNote,
+    artistReviewNote,
+    submittedAt,
+    submittedByArtistId,
+    reviewedAt,
+    reviewedByAdminId,
+    reviewUpdatedAt,
+    ...safeRecord
+  } = record || {};
+
+  return safeRecord;
+}
+
 function optimizeArtistForPublic(content, artist) {
   return {
-    ...artist,
+    ...publicRecord(artist),
     heroImage: resolveImagePath(content, artist.heroImage, "gallery")
   };
 }
 
 function optimizeGalleryForPublic(content, gallery) {
   return {
-    ...gallery,
+    ...publicRecord(gallery),
     coverImage: resolveImagePath(content, gallery.coverImage, "gallery")
   };
 }
 
 function optimizeArtworkForPublic(content, artwork) {
   return {
-    ...artwork,
+    ...publicRecord(artwork),
     image: resolveImagePath(content, artwork.image, "gallery"),
     largeImage: resolveImagePath(content, artwork.image, "large")
   };
@@ -387,6 +404,21 @@ function publicContentWithArtist(content, artist) {
       ...optimizeGalleryForPublic(content, gallery),
       artworks: content.artwork
         .filter((artwork) => artwork.galleryId === gallery.id && artwork.status === "published")
+        .sort(sortByDisplayOrder)
+        .map((artwork) => optimizeArtworkForPublic(content, artwork))
+    }));
+
+  return { ...optimizeArtistForPublic(content, artist), galleries };
+}
+
+function previewContentWithArtist(content, artist) {
+  const galleries = content.galleries
+    .filter((gallery) => gallery.artistId === artist.id && gallery.status !== "archived")
+    .sort(sortByDisplayOrder)
+    .map((gallery) => ({
+      ...optimizeGalleryForPublic(content, gallery),
+      artworks: content.artwork
+        .filter((artwork) => artwork.galleryId === gallery.id && artwork.status !== "archived")
         .sort(sortByDisplayOrder)
         .map((artwork) => optimizeArtworkForPublic(content, artwork))
     }));
@@ -1255,7 +1287,7 @@ function validateArtist(input, content, existing) {
   }
 
   if (!hasValidStatus(status)) {
-    errors.push("Artist status must be published, draft, or archived.");
+    errors.push("Artist status is not valid.");
   }
 
   if (!hasValidInvitationStatus(invitationStatus)) {
@@ -1325,7 +1357,7 @@ function validateGallery(input, content, existing) {
   }
 
   if (!hasValidStatus(status)) {
-    errors.push("Gallery status must be published, draft, or archived.");
+    errors.push("Gallery status is not valid.");
   }
 
   if (coverImage && (!isValidImageReference(coverImage) || !isReadyUploadReference(content, coverImage))) {
@@ -1378,7 +1410,7 @@ function validateArtwork(input, content, existing) {
   }
 
   if (!hasValidStatus(status)) {
-    errors.push("Artwork status must be published, draft, or archived.");
+    errors.push("Artwork status is not valid.");
   }
 
   if (status === "published" && (!isValidImageReference(image) || !isReadyUploadReference(content, image))) {
@@ -2229,6 +2261,154 @@ function acceptInvitation(request, response, token) {
   });
 }
 
+function recordTitle(record, type) {
+  if (type === "artist") {
+    return record.name || "Artist profile";
+  }
+
+  return record.title || "Untitled";
+}
+
+function collectionForReviewType(content, type) {
+  if (type === "artist") {
+    return content.artists;
+  }
+
+  if (type === "gallery") {
+    return content.galleries;
+  }
+
+  if (type === "artwork") {
+    return content.artwork;
+  }
+
+  return null;
+}
+
+function findReviewRecord(content, type, id) {
+  const collection = collectionForReviewType(content, type);
+  return collection?.find((item) => item.id === id) || null;
+}
+
+function reviewRecordArtistId(record, type) {
+  return type === "artist" ? record?.id : record?.artistId;
+}
+
+function recordStatusHistory(content, type, record, previousStatus, newStatus, changedBy, note = "") {
+  content.statusHistory.push({
+    id: generateId("status-history"),
+    recordType: type,
+    recordId: record.id,
+    previousStatus: previousStatus || "",
+    newStatus,
+    changedBy,
+    note: cleanLimitedString(note, 1500),
+    createdAt: nowIso()
+  });
+}
+
+function transitionReviewRecord(content, type, record, nextStatus, changedBy, note = "", patch = {}) {
+  const previousStatus = record.status || "draft";
+  record.status = nextStatus;
+  record.updatedAt = nowIso();
+  Object.assign(record, patch);
+  recordStatusHistory(content, type, record, previousStatus, nextStatus, changedBy, note);
+}
+
+function reviewQueueItems(content) {
+  const items = [];
+
+  ["artist", "gallery", "artwork"].forEach((type) => {
+    const collection = collectionForReviewType(content, type) || [];
+    collection.forEach((record) => {
+      if (["pending_review", "changes_requested", "approved"].includes(record.status)) {
+        items.push({
+          id: `${type}:${record.id}`,
+          type,
+          recordId: record.id,
+          artistId: reviewRecordArtistId(record, type),
+          title: recordTitle(record, type),
+          status: record.status,
+          submittedAt: record.submittedAt || record.updatedAt || record.createdAt,
+          artistReviewNote: record.artistReviewNote || "",
+          adminReviewNote: record.adminReviewNote || ""
+        });
+      }
+    });
+  });
+
+  return items.sort((left, right) => String(right.submittedAt || "").localeCompare(String(left.submittedAt || "")));
+}
+
+function submitReviewRecord(context, type, id, input) {
+  const content = loadContent();
+  const record = findReviewRecord(content, type, id);
+
+  if (!record || reviewRecordArtistId(record, type) !== context.artist.id) {
+    return { ok: false, statusCode: 404, message: "Record was not found." };
+  }
+
+  if (record.protected) {
+    return { ok: false, statusCode: 403, message: "This record cannot be submitted from the artist portal." };
+  }
+
+  if (record.status === "archived") {
+    return { ok: false, statusCode: 409, message: "Archived records cannot be submitted for review." };
+  }
+
+  const now = nowIso();
+  transitionReviewRecord(content, type, record, "pending_review", context.account.email, input.note || "", {
+    submittedAt: now,
+    submittedByArtistId: context.artist.id,
+    artistReviewNote: cleanLimitedString(input.note, 1500),
+    adminReviewNote: ""
+  });
+
+  saveContent(content, "review-submit");
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Submitted for review.",
+    content
+  };
+}
+
+function adminReviewRecord(type, id, input, session) {
+  const content = loadContent();
+  const record = findReviewRecord(content, type, id);
+  const action = cleanString(input.action || input.status);
+  const note = cleanLimitedString(input.note || input.adminReviewNote, 1500);
+  const allowed = new Set(["approved", "published", "changes_requested", "archived"]);
+
+  if (!record) {
+    return { ok: false, statusCode: 404, message: "Review record was not found." };
+  }
+
+  if (record.protected) {
+    return { ok: false, statusCode: 403, message: "This protected record cannot be changed through review." };
+  }
+
+  if (!allowed.has(action)) {
+    return { ok: false, statusCode: 422, message: "Review action is not valid." };
+  }
+
+  const now = nowIso();
+  transitionReviewRecord(content, type, record, action, session?.email || adminEmail, note, {
+    reviewedAt: now,
+    reviewedByAdminId: session?.email || adminEmail,
+    adminReviewNote: note,
+    reviewUpdatedAt: now
+  });
+
+  saveContent(content, "review-admin-action");
+  return {
+    ok: true,
+    statusCode: 200,
+    message: action === "changes_requested" ? "Changes requested." : `Record marked ${action}.`,
+    content
+  };
+}
+
 function verifyArtistPassword(password, account) {
   if (!account?.passwordHash || !account?.passwordSalt) {
     return false;
@@ -2316,6 +2496,11 @@ function buildArtistPortalContent(context) {
   const artwork = context.content.artwork
     .filter((item) => item.artistId === context.artist.id && galleryIds.has(item.galleryId))
     .sort(sortByDisplayOrder);
+  const ownedIds = new Set([
+    context.artist.id,
+    ...galleries.map((gallery) => gallery.id),
+    ...artwork.map((item) => item.id)
+  ]);
 
   return {
     account: {
@@ -2329,7 +2514,8 @@ function buildArtistPortalContent(context) {
     galleries,
     artwork,
     media: artistScopedMedia(context.content, context.artist, galleries, artwork),
-    inquiries: artistScopedInquiries(context.content, context.artist.id)
+    inquiries: artistScopedInquiries(context.content, context.artist.id),
+    statusHistory: context.content.statusHistory.filter((entry) => ownedIds.has(entry.recordId))
   };
 }
 
@@ -2413,6 +2599,8 @@ function updateArtistProfile(context, input) {
     website: cleanString(input.website),
     contactEmail,
     socialLinks: parseLinks(input.socialLinks),
+    status: ["published", "approved"].includes(artist.status) ? "draft" : artist.status,
+    adminReviewNote: "",
     updatedAt: nowIso()
   });
 
@@ -2446,6 +2634,8 @@ function updateArtistGallery(context, id, input) {
     title: cleanString(input.title),
     description: cleanString(input.description),
     coverImage,
+    status: ["published", "approved"].includes(gallery.status) ? "draft" : gallery.status,
+    adminReviewNote: "",
     displayOrder: Number(input.displayOrder || 0),
     updatedAt: nowIso()
   });
@@ -2494,6 +2684,8 @@ function updateArtistArtwork(context, id, input) {
     medium: cleanString(input.medium),
     dimensions: cleanString(input.dimensions),
     description: cleanString(input.description),
+    status: ["published", "approved"].includes(artwork.status) ? "draft" : artwork.status,
+    adminReviewNote: "",
     displayOrder: Number(input.displayOrder || 0),
     updatedAt: nowIso()
   });
@@ -2567,6 +2759,21 @@ function handleArtistApi(request, response, pathname) {
   if (request.method === "POST" && inquiryMatch) {
     collectJson(request, response, (input) => {
       const result = updateInquiry(decodeURIComponent(inquiryMatch[1]), input, { artistId: context.artist.id });
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        content: result.content ? buildArtistPortalContent({ ...context, content: result.content }) : buildArtistPortalContent(context)
+      });
+    });
+    return;
+  }
+
+  const reviewSubmitMatch = pathname.match(/^\/artist\/api\/review\/(artist|gallery|artwork)\/([^/]+)\/submit$/);
+  if (request.method === "POST" && reviewSubmitMatch) {
+    collectJson(request, response, (input) => {
+      const type = reviewSubmitMatch[1];
+      const id = type === "artist" ? context.artist.id : decodeURIComponent(reviewSubmitMatch[2]);
+      const result = submitReviewRecord(context, type, id, input);
       sendJson(response, result.statusCode, {
         ok: result.ok,
         message: result.message,
@@ -2681,7 +2888,58 @@ function handleAdminApi(request, response, pathname) {
     return;
   }
 
+  const reviewActionMatch = pathname.match(/^\/admin\/api\/review\/(artist|gallery|artwork)\/([^/]+)$/);
+  if (request.method === "POST" && reviewActionMatch) {
+    collectJson(request, response, (input) => {
+      const result = adminReviewRecord(reviewActionMatch[1], decodeURIComponent(reviewActionMatch[2]), input, adminSession);
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        content: publicSafeContent(result.content || loadContent())
+      });
+    });
+    return;
+  }
+
   sendJson(response, 404, { ok: false, message: "Admin endpoint was not found." });
+}
+
+function sendPreviewPage(response, artist) {
+  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  response.end(renderPublicArtistPage(artist).replace("</body>", '<div class="preview-ribbon">Private Preview</div></body>'));
+}
+
+function sendAdminPreview(request, response, artistId) {
+  if (!getSession(request)) {
+    redirect(response, "/admin/login/", 302);
+    return;
+  }
+
+  const content = loadContent();
+  const artist = content.artists.find((item) => item.id === artistId);
+  if (!artist || artist.status === "archived") {
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Preview not found");
+    return;
+  }
+
+  sendPreviewPage(response, previewContentWithArtist(content, artist));
+}
+
+function sendArtistPreview(request, response) {
+  const context = getArtistContext(request);
+  if (!context) {
+    redirect(response, "/artist/login/", 302);
+    return;
+  }
+
+  if (context.artist.status === "archived") {
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Preview not found");
+    return;
+  }
+
+  sendPreviewPage(response, previewContentWithArtist(context.content, context.artist));
 }
 
 function handleLogin(request, response) {
@@ -2814,6 +3072,17 @@ function handleRequest(request, response) {
 
   if (inviteMatch && request.method === "POST") {
     acceptInvitation(request, response, decodeURIComponent(inviteMatch[1]));
+    return;
+  }
+
+  const adminPreviewMatch = pathname.match(/^\/admin\/preview\/artist\/([^/]+)\/?$/);
+  if (adminPreviewMatch && request.method === "GET") {
+    sendAdminPreview(request, response, decodeURIComponent(adminPreviewMatch[1]));
+    return;
+  }
+
+  if (pathname === "/artist/preview/" && request.method === "GET") {
+    sendArtistPreview(request, response);
     return;
   }
 
