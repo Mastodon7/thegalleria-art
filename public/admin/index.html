@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Admin | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <form action="/admin/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="admin-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Private Foundation</p>
+          <h1 id="admin-title">The Galleria.Art Admin</h1>
+          <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
+        </div>
+      </div>
+
+      <section class="admin-grid" aria-label="Admin sections">
+        <article>
+          <p>Artists</p>
+          <h2>Artist Profiles</h2>
+          <span>Placeholder for future artist records and invitations.</span>
+        </article>
+        <article>
+          <p>Galleries</p>
+          <h2>Gallery Pages</h2>
+          <span>Placeholder for future gallery publishing controls.</span>
+        </article>
+        <article>
+          <p>Public Pages</p>
+          <h2>Site Content</h2>
+          <span>Placeholder for future homepage and public page edits.</span>
+        </article>
+        <article>
+          <p>Settings</p>
+          <h2>Account Settings</h2>
+          <span>Placeholder for password changes and owner preferences.</span>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Admin Login | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page admin-login-page">
+  <main class="admin-login-shell">
+    <section class="admin-card admin-login-card" aria-labelledby="admin-login-title">
+      <p class="section-kicker">Private Access</p>
+      <h1 id="admin-login-title">The Galleria.Art Admin</h1>
+      <p class="admin-muted">Owner login for managing the private gallery foundation.</p>
+      <p class="admin-alert" id="login-error" hidden>Email or password was not recognized.</p>
+
+      <form class="admin-form" action="/admin/login" method="post">
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" autocomplete="username" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="home-button admin-submit" type="submit">Log In</button>
+      </form>
+
+      <p class="admin-note">Temporary bootstrap access is active. Change this password as soon as password settings are added.</p>
+      <a class="admin-return" href="/">Return to public site</a>
+    </section>
+  </main>
+
+  <script>
+    if (new URLSearchParams(window.location.search).has("error")) {
+      document.getElementById("login-error").hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -8,6 +8,19 @@ The root domain presents the gallery platform landing page. Carolyn Elaine's pre
 - `/CarolynElaine/` redirects to `/carolyn-elaine/`
 - `/carolynelaine/` redirects to `/carolyn-elaine/`
 
+## Admin foundation
+
+The private owner login is available at `/admin/login/`. The protected landing page is `/admin/`.
+
+This phase adds a small Node server so admin authentication happens server-side instead of in public browser code. The bootstrap admin email defaults to `mc@25mprinting.com`, and the temporary password is stored as a server-side hash. For production, set these environment variables in the hosting panel:
+
+- `SESSION_SECRET`: long random value used to sign admin sessions.
+- `ADMIN_EMAIL`: owner login email, if different from the default.
+- `ADMIN_PASSWORD_HASH`: server-side scrypt hash for a replacement password.
+- `ADMIN_PASSWORD_SALT`: salt used to create the replacement hash.
+
+Without a backend/runtime, a static-only site cannot provide a truly private admin login. This foundation keeps storage simple with signed HTTP-only cookies and no database.
+
 ## Coolify
 
 1. Push this folder to a GitHub repository.
