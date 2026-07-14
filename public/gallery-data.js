@@ -3,6 +3,7 @@ window.GalleriaData = {
     {
       name: "Carolyn Elaine",
       slug: "carolyn-elaine",
+      canonicalPath: "/carolyn-elaine/",
       professionalTitle: "Public Artist",
       city: "Chicago, Illinois",
       medium: "Mosaic and public art",
@@ -17,7 +18,9 @@ window.GalleriaData = {
           description: "A curated presentation of permanent public artworks, mosaic environments, and community-centered installations.",
           featured: true
         }
-      ]
+      ],
+      featured: true,
+      invitationStatus: "current"
     }
   ]
 };

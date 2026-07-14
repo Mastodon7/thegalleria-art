@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Beautiful online galleries for artists, photographers, creators, and collectors.">
+  <meta name="description" content="The Galleria.Art creates refined hosted online gallery pages for artists, photographers, creators, and collectors.">
   <title>The Galleria.Art</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -13,6 +13,7 @@
     <nav class="site-nav" aria-label="Public navigation">
       <a href="#current-galleries">Galleries</a>
       <a href="#featured-gallery">Featured</a>
+      <a href="#for-artists">For Artists</a>
       <a href="#artist-login">Artist Login</a>
     </nav>
   </header>
@@ -23,10 +24,49 @@
         <p class="welcome-line">WELCOME TO</p>
         <h1>THE GALLERIA.ART</h1>
         <div class="gold-divider" aria-hidden="true"></div>
-        <p class="hero-support">Beautiful online galleries for artists, photographers, creators, and collectors.</p>
+        <p class="hero-support">Refined hosted gallery pages for artists, photographers, creators, and collectors who want their work presented with quiet polish.</p>
         <div class="hero-actions">
           <a class="home-button" href="#current-galleries">VIEW CURRENT GALLERIES</a>
-          <a class="home-button secondary" id="artist-login" href="#" aria-disabled="true">ARTIST LOGIN</a>
+          <a class="home-button secondary" href="mailto:hello@thegalleria.art?subject=Request%20an%20Invitation">REQUEST AN INVITATION</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="product-section" id="for-artists" aria-labelledby="for-artists-title">
+      <div class="section-inner product-layout">
+        <div class="section-heading vertical-heading">
+          <p class="section-kicker">For Artists</p>
+          <h2 id="for-artists-title">A gallery presence without building the website yourself.</h2>
+        </div>
+        <div class="product-copy">
+          <p>The Galleria.Art gives artists and creators a polished online gallery presence built for focused viewing, collector introductions, and clear presentation.</p>
+          <p>Each public gallery can include curated online gallery pages, an artist profile, featured work, mobile-friendly viewing, and a clean collector-facing experience. Future private artist tools and invitation-based onboarding will extend this foundation without cluttering the public galleries.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="process-section" id="how-it-works" aria-labelledby="how-it-works-title">
+      <div class="section-inner">
+        <div class="section-heading">
+          <p class="section-kicker">Process</p>
+          <h2 id="how-it-works-title">HOW IT WORKS</h2>
+        </div>
+        <div class="process-grid">
+          <article>
+            <span>1</span>
+            <h3>Share your work</h3>
+            <p>Artists provide images, titles, descriptions, and contact details.</p>
+          </article>
+          <article>
+            <span>2</span>
+            <h3>We prepare the gallery</h3>
+            <p>The Galleria.Art formats the work into a refined online gallery experience.</p>
+          </article>
+          <article>
+            <span>3</span>
+            <h3>Collectors can view and inquire</h3>
+            <p>Visitors can browse the gallery and contact the artist or gallery representative.</p>
+          </article>
         </div>
       </div>
     </section>
@@ -57,15 +97,24 @@
         </div>
       </div>
     </section>
+
+    <section class="invitation-section" aria-labelledby="invitation-title">
+      <div class="section-inner invitation-copy">
+        <p class="section-kicker">Invitation-Based Onboarding</p>
+        <h2 id="invitation-title">Preparing a gallery for your work?</h2>
+        <p>The Galleria.Art is currently onboarding artists by invitation while the public gallery foundation grows.</p>
+        <a class="home-button" href="mailto:hello@thegalleria.art?subject=Request%20an%20Invitation">REQUEST AN INVITATION</a>
+      </div>
+    </section>
   </main>
 
   <footer class="site-footer">
     <nav aria-label="Footer navigation">
-      <a href="#">About</a>
-      <a href="#">Contact</a>
-      <a href="#">Artist Login</a>
-      <a href="#">Privacy</a>
-      <a href="#">Terms</a>
+      <a href="/about/">About</a>
+      <a href="/contact/">Contact</a>
+      <a id="artist-login" href="#" aria-disabled="true">Artist Login</a>
+      <a href="/privacy/">Privacy</a>
+      <a href="/terms/">Terms</a>
     </nav>
     <p>&copy; 2026 The Galleria.Art. All rights reserved.</p>
   </footer>
