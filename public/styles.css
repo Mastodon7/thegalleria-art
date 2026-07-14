@@ -189,6 +189,61 @@ a {
   background: #171511;
 }
 
+.pricing-hero {
+  display: grid;
+  min-height: 54vh;
+  align-items: center;
+  padding: clamp(80px, 10vw, 130px) 24px clamp(50px, 7vw, 90px);
+}
+
+.pricing-hero h1 {
+  max-width: 850px;
+  margin: 0;
+  color: #f8f1e6;
+  font: 400 clamp(3rem, 7vw, 6.4rem)/.95 Georgia, serif;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 18px;
+}
+
+.pricing-card {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-height: 100%;
+  padding: 24px;
+  border: 1px solid rgba(185, 151, 77, .28);
+  background: rgba(11, 10, 8, .72);
+}
+
+.pricing-card h3 {
+  margin: 0;
+  color: #f8f1e6;
+  font: 400 1.8rem/1.1 Georgia, serif;
+}
+
+.pricing-card strong {
+  color: #f8f1e6;
+  font: 400 1.25rem/1.2 Georgia, serif;
+}
+
+.pricing-card span,
+.pricing-card p,
+.pricing-card li {
+  color: #d7ccb9;
+  line-height: 1.5;
+}
+
+.pricing-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .product-layout {
   display: grid;
   grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);

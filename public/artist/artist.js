@@ -2,6 +2,8 @@
   const state = {
     account: {},
     artist: {},
+    plans: [],
+    billing: {},
     galleries: [],
     artwork: [],
     media: [],
@@ -264,6 +266,8 @@
   function applyContent(content) {
     state.account = content.account || {};
     state.artist = content.artist || {};
+    state.plans = content.plans || [];
+    state.billing = content.billing || {};
     state.galleries = content.galleries || [];
     state.artwork = content.artwork || [];
     state.media = content.media || [];
@@ -517,6 +521,51 @@
     `;
   }
 
+  function usageLine(label, value, limit) {
+    const cap = Number(limit || 0);
+    const current = Number(value || 0);
+    return `<p><strong>${escapeHtml(label)}</strong> ${current.toLocaleString()}${cap ? ` / ${cap.toLocaleString()}` : ""}</p>`;
+  }
+
+  function renderBilling() {
+    const panel = document.getElementById("artist-billing-panel");
+    if (!panel) {
+      return;
+    }
+
+    const billing = state.billing || {};
+    const plan = billing.plan || {};
+    const usage = billing.usage || {};
+    const provider = billing.providerStatus || {};
+    panel.innerHTML = `
+      <div class="status-summary-grid">
+        <article>
+          <strong>${escapeHtml(plan.name || "No plan assigned")}</strong>
+          <span>${escapeHtml(billing.billingStatus || "not_configured")} / ${escapeHtml(billing.subscriptionStatus || "not_configured")}</span>
+          <p>${escapeHtml(plan.description || "The Galleria.Art will assign a plan as billing is prepared.")}</p>
+        </article>
+        <article>
+          <strong>Usage</strong>
+          ${usageLine("Galleries", usage.galleries, plan.galleryLimit)}
+          ${usageLine("Artwork", usage.artwork, plan.artworkLimit)}
+          ${usageLine("Media Files", usage.media)}
+          ${usageLine("Media Storage MB", usage.storageMb, plan.mediaStorageLimit)}
+        </article>
+        <article>
+          <strong>Billing</strong>
+          <p>${provider.configured ? `Billing provider is in ${escapeHtml(provider.mode)} mode.` : "Billing is not yet enabled. Account access is currently managed by The Galleria.Art."}</p>
+          ${billing.trialEndAt ? `<p>Trial ends ${escapeHtml(formatDate(billing.trialEndAt))}</p>` : ""}
+          ${billing.cancelAtPeriodEnd ? "<p>Cancellation is scheduled at period end.</p>" : ""}
+        </article>
+      </div>
+      ${billing.warnings?.length ? `<div class="review-note-block"><strong>Usage notices</strong>${billing.warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}</div>` : ""}
+      <div class="review-status-actions">
+        <button type="button" disabled>Change Plan</button>
+        <a href="/contact/">Contact About Billing</a>
+      </div>
+    `;
+  }
+
   function renderGalleryForm(gallery = state.galleries[0] || {}) {
     const form = document.getElementById("artist-gallery-form");
     if (!form) {
@@ -718,6 +767,7 @@
     renderDashboard();
     renderProfileForm();
     renderProfileReview();
+    renderBilling();
     renderGalleries();
     renderArtwork();
     renderMedia();

@@ -66,6 +66,18 @@ Phase 13 adds `/sitemap.xml`, `/robots.txt`, richer public metadata, admin-only 
 - Admin exports are available from `/admin/settings/`.
 - Audit events are visible at `/admin/audit/`.
 
+## Plans and billing foundation
+
+Phase 14 adds public pricing at `/pricing/`, protected plan management at `/admin/plans/`, and artist billing status at `/artist/billing/`. Billing remains configuration-ready and does not collect payments unless provider setup is intentionally added.
+
+- `BILLING_PROVIDER`: optional provider name, defaults to `none`.
+- `BILLING_MODE`: `disabled`, `test`, or `live`; defaults to `disabled` unless a Stripe secret is present.
+- `STRIPE_SECRET_KEY`: marks Stripe as configured for future test/live integration. No checkout or webhook processing is enabled by this variable alone.
+- `DEFAULT_TRIAL_DAYS`: default trial display value, defaults to `14`.
+- `DEFAULT_PLAN_SLUG`: default plan assignment fallback, defaults to `starter`.
+
+Live checkout and signed payment webhooks are future work. Until then, account access and plan changes are managed by The Galleria.Art through the admin tools.
+
 ## Artist portal demo
 
 Phase 7 adds the first protected artist-facing demo portal at `/artist/login/`.

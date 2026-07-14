@@ -23,6 +23,10 @@ const emailFrom = process.env.EMAIL_FROM || "";
 const resendApiKey = process.env.RESEND_API_KEY || "";
 const analyticsProvider = process.env.ANALYTICS_PROVIDER || "";
 const analyticsId = process.env.ANALYTICS_ID || process.env.PLAUSIBLE_DOMAIN || "";
+const billingProvider = process.env.BILLING_PROVIDER || "none";
+const billingMode = process.env.BILLING_MODE || (process.env.STRIPE_SECRET_KEY ? "test" : "disabled");
+const defaultTrialDays = Number(process.env.DEFAULT_TRIAL_DAYS || 14);
+const defaultPlanSlug = process.env.DEFAULT_PLAN_SLUG || "starter";
 const passwordSalt = process.env.ADMIN_PASSWORD_SALT || "galleria-admin-bootstrap-v1";
 const passwordHash = process.env.ADMIN_PASSWORD_HASH ||
   "61a567bd15cf8240b460bb5199b408e73bf6fea3f93d529075a56be811e0b3d9eeb280e43bf340411d87355f2fc85a0dc23765e5644062cdcc875f738ea53ec2";
@@ -35,6 +39,8 @@ const validStatuses = new Set(workflowStatuses);
 const validInvitationStatuses = new Set(["current", "invited", "pending", "accepted", "none"]);
 const validInquiryStatuses = new Set(["new", "reviewed", "replied", "archived", "spam"]);
 const validArtistInvitationStatuses = new Set(["pending", "accepted", "expired", "revoked"]);
+const validBillingStatuses = new Set(["trial", "active", "past_due", "canceled", "comped", "legacy", "demo", "not_configured"]);
+const validSubscriptionStatuses = new Set(["trialing", "active", "past_due", "canceled", "incomplete", "none", "not_configured"]);
 const inquiryRateLimit = new Map();
 const inquiryRateLimitWindowMs = 10 * 60 * 1000;
 const inquiryRateLimitMax = 6;
@@ -214,6 +220,7 @@ function normalizeContent(content) {
   return {
     version: 1,
     artists: Array.isArray(content.artists) ? content.artists : [],
+    plans: Array.isArray(content.plans) ? content.plans : [],
     galleries: Array.isArray(content.galleries) ? content.galleries : [],
     artwork: Array.isArray(content.artwork) ? content.artwork : [],
     media: Array.isArray(content.media) ? content.media : [],
@@ -254,7 +261,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts"].forEach((collection) => {
+  ["artists", "plans", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -332,6 +339,91 @@ function emailServiceStatus() {
     mode: configured ? "live" : "log-only",
     from: configured ? emailFrom : "",
     publicContactEmail
+  };
+}
+
+function billingProviderStatus() {
+  const configured = Boolean(process.env.STRIPE_SECRET_KEY);
+  const mode = configured ? (billingMode === "live" ? "live" : "test") : "disabled";
+  return {
+    configured,
+    provider: configured ? (billingProvider === "none" ? "stripe" : billingProvider) : "none",
+    mode,
+    publicPricingVisible: true,
+    defaultTrialDays,
+    defaultPlanSlug,
+    supportContactEmail: publicContactEmail
+  };
+}
+
+function activePlans(content) {
+  return content.plans
+    .filter((plan) => plan.status === "active")
+    .sort(sortByDisplayOrder);
+}
+
+function planById(content, id) {
+  return content.plans.find((plan) => plan.id === id) || null;
+}
+
+function planBySlug(content, slug) {
+  return content.plans.find((plan) => plan.slug === slug) || null;
+}
+
+function defaultPlan(content) {
+  return planBySlug(content, defaultPlanSlug) || activePlans(content)[0] || content.plans[0] || null;
+}
+
+function artistPlan(content, artist) {
+  return planById(content, artist.planId) || defaultPlan(content);
+}
+
+function artistUsage(content, artistId) {
+  const galleries = content.galleries.filter((gallery) => gallery.artistId === artistId);
+  const artwork = content.artwork.filter((item) => item.artistId === artistId);
+  const media = content.media.filter((item) => item.ownerArtistId === artistId && item.status !== "archived");
+  const storageBytes = media.reduce((sum, item) => sum + Number(item.size || item.originalSize || 0), 0);
+  return {
+    galleries: galleries.length,
+    artwork: artwork.length,
+    media: media.length,
+    storageBytes,
+    storageMb: Math.ceil(storageBytes / (1024 * 1024))
+  };
+}
+
+function usageWarnings(plan, usage) {
+  if (!plan) {
+    return [];
+  }
+
+  const checks = [
+    ["galleries", plan.galleryLimit, "gallery"],
+    ["artwork", plan.artworkLimit, "artwork"],
+    ["storageMb", plan.mediaStorageLimit, "media storage"]
+  ];
+
+  return checks
+    .filter(([, limit]) => Number(limit || 0) > 0)
+    .filter(([key, limit]) => Number(usage[key] || 0) >= Number(limit) * 0.9)
+    .map(([, limit, label]) => `${label} usage is near the ${limit} limit.`);
+}
+
+function billingSnapshot(content, artist) {
+  const plan = artistPlan(content, artist);
+  const usage = artistUsage(content, artist.id);
+  return {
+    plan,
+    usage,
+    warnings: usageWarnings(plan, usage),
+    billingStatus: artist.billingStatus || "not_configured",
+    subscriptionStatus: artist.subscriptionStatus || "not_configured",
+    trialStartAt: artist.trialStartAt || "",
+    trialEndAt: artist.trialEndAt || "",
+    currentPeriodStart: artist.currentPeriodStart || "",
+    currentPeriodEnd: artist.currentPeriodEnd || "",
+    cancelAtPeriodEnd: Boolean(artist.cancelAtPeriodEnd),
+    providerStatus: billingProviderStatus()
   };
 }
 
@@ -557,6 +649,16 @@ function publicRecord(record) {
     reviewedAt,
     reviewedByAdminId,
     reviewUpdatedAt,
+    planId,
+    billingStatus,
+    subscriptionStatus,
+    trialStartAt,
+    trialEndAt,
+    currentPeriodStart,
+    currentPeriodEnd,
+    cancelAtPeriodEnd,
+    externalCustomerId,
+    externalSubscriptionId,
     ...safeRecord
   } = record || {};
 
@@ -802,6 +904,7 @@ function renderPublicArtistPage(artist) {
     <nav aria-label="Footer navigation">
       <a href="/about/">About</a>
       <a href="/contact/">Contact</a>
+      <a href="/pricing/">Pricing</a>
       <a href="/artist/login/">Artist Login</a>
       <a href="/privacy/">Privacy</a>
       <a href="/terms/">Terms</a>
@@ -838,12 +941,108 @@ function sendPublicGalleryData(response) {
   response.end(`window.GalleriaData = ${JSON.stringify(publicData, null, 2)};\n`);
 }
 
+function formatPlanPrice(plan) {
+  const amount = Number(plan.monthlyPrice || 0);
+  if (!amount) {
+    return "By invitation";
+  }
+  return `$${amount.toLocaleString()} / month`;
+}
+
+function renderPricingPage(content) {
+  const plans = activePlans(content);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Plans and pricing foundation for The Galleria.Art hosted online gallery services.">
+  <link rel="canonical" href="${escapeHtml(absoluteUrl("/pricing/"))}">
+  <meta property="og:title" content="Pricing | The Galleria.Art">
+  <meta property="og:description" content="Refined hosted online gallery plans for artists, creators, galleries, and studios.">
+  <meta property="og:url" content="${escapeHtml(absoluteUrl("/pricing/"))}">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="${escapeHtml(absoluteUrl("/images/whispers-main.jpeg"))}">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Pricing | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="home-page pricing-page">
+  <header class="site-header" aria-label="The Galleria.Art">
+    <a class="site-brand" href="/">The Galleria.Art</a>
+    <nav class="site-nav" aria-label="Public navigation">
+      <a href="/">Home</a>
+      <a href="/pricing/">Pricing</a>
+      <a href="/contact/">Contact</a>
+      <a href="/artist/login/">Artist Login</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="pricing-hero">
+      <div class="section-inner">
+        <p class="welcome-line">PLANS</p>
+        <h1>Hosted gallery presence, prepared with care.</h1>
+        <div class="gold-divider" aria-hidden="true"></div>
+        <p class="hero-support">The Galleria.Art is invitation-based while billing is being prepared. Plans below are the current service foundation and may be refined before live payment collection begins.</p>
+      </div>
+    </section>
+
+    <section class="product-section" aria-labelledby="pricing-title">
+      <div class="section-inner">
+        <div class="section-heading">
+          <p class="section-kicker">Pricing Foundation</p>
+          <h2 id="pricing-title">Artist and gallery plans</h2>
+        </div>
+        <div class="pricing-grid">
+          ${plans.map((plan) => `
+            <article class="pricing-card">
+              <p class="section-kicker">${escapeHtml(plan.slug)}</p>
+              <h3>${escapeHtml(plan.name)}</h3>
+              <strong>${escapeHtml(formatPlanPrice(plan))}</strong>
+              ${plan.annualPrice ? `<span>$${Number(plan.annualPrice).toLocaleString()} annually</span>` : "<span>Annual billing optional later</span>"}
+              <p>${escapeHtml(plan.description)}</p>
+              <ul>
+                <li>${Number(plan.galleryLimit || 0).toLocaleString()} ${Number(plan.galleryLimit || 0) === 1 ? "gallery" : "galleries"}</li>
+                <li>${Number(plan.artworkLimit || 0).toLocaleString()} artwork records</li>
+                <li>${Number(plan.mediaStorageLimit || 0).toLocaleString()} MB media foundation</li>
+                ${plan.featuredGalleryEligible ? "<li>Featured gallery eligible</li>" : ""}
+                ${plan.customDomainEligible ? "<li>Custom domain eligible</li>" : ""}
+              </ul>
+              <a class="home-button" href="/contact/">Request Invitation</a>
+            </article>
+          `).join("")}
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="Footer navigation">
+      <a href="/about/">About</a>
+      <a href="/contact/">Contact</a>
+      <a href="/pricing/">Pricing</a>
+      <a href="/artist/login/">Artist Login</a>
+      <a href="/privacy/">Privacy</a>
+      <a href="/terms/">Terms</a>
+    </nav>
+    <p>&copy; 2026 The Galleria.Art. All rights reserved.</p>
+  </footer>
+</body>
+</html>`;
+}
+
+function sendPricingPage(response) {
+  sendHtml(response, 200, injectAnalytics(renderPricingPage(loadContent())));
+}
+
 function sitemapUrls() {
   const content = loadContent();
   const urls = new Set([
     "/",
     "/about/",
     "/contact/",
+    "/pricing/",
     "/privacy/",
     "/terms/",
     "/carolyn-elaine/"
@@ -1539,6 +1738,14 @@ function hasValidArtistInvitationStatus(value) {
   return validArtistInvitationStatuses.has(value);
 }
 
+function hasValidBillingStatus(value) {
+  return validBillingStatuses.has(value);
+}
+
+function hasValidSubscriptionStatus(value) {
+  return validSubscriptionStatuses.has(value);
+}
+
 function generateId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -1567,6 +1774,10 @@ function validateArtist(input, content, existing) {
   const invitationStatus = cleanString(input.invitationStatus || "none");
   const contactEmail = cleanString(input.contactEmail);
   const heroImage = cleanString(input.heroImage);
+  const planId = cleanString(input.planId || existing?.planId || defaultPlan(content)?.id || "");
+  const billingStatus = cleanString(input.billingStatus || existing?.billingStatus || "not_configured");
+  const subscriptionStatus = cleanString(input.subscriptionStatus || existing?.subscriptionStatus || "not_configured");
+  const plan = planId ? planById(content, planId) : null;
 
   if (!name) {
     errors.push("Artist name is required.");
@@ -1586,6 +1797,18 @@ function validateArtist(input, content, existing) {
 
   if (!hasValidInvitationStatus(invitationStatus)) {
     errors.push("Invitation status is not valid.");
+  }
+
+  if (planId && !plan) {
+    errors.push("Selected billing plan was not found.");
+  }
+
+  if (!hasValidBillingStatus(billingStatus)) {
+    errors.push("Billing status is not valid.");
+  }
+
+  if (!hasValidSubscriptionStatus(subscriptionStatus)) {
+    errors.push("Subscription status is not valid.");
   }
 
   if (!isValidEmail(contactEmail)) {
@@ -1618,10 +1841,106 @@ function validateArtist(input, content, existing) {
       status,
       featured: parseBoolean(input.featured),
       invitationStatus,
+      planId,
+      billingStatus,
+      subscriptionStatus,
+      trialStartAt: cleanString(input.trialStartAt || existing?.trialStartAt),
+      trialEndAt: cleanString(input.trialEndAt || existing?.trialEndAt),
+      currentPeriodStart: cleanString(input.currentPeriodStart || existing?.currentPeriodStart),
+      currentPeriodEnd: cleanString(input.currentPeriodEnd || existing?.currentPeriodEnd),
+      cancelAtPeriodEnd: parseBoolean(input.cancelAtPeriodEnd ?? existing?.cancelAtPeriodEnd),
+      externalCustomerId: cleanString(input.externalCustomerId || existing?.externalCustomerId),
+      externalSubscriptionId: cleanString(input.externalSubscriptionId || existing?.externalSubscriptionId),
       protected: Boolean(existing?.protected),
       createdAt: existing?.createdAt || nowIso(),
       updatedAt: nowIso()
     }
+  };
+}
+
+function validatePlan(input, content, existing) {
+  const errors = [];
+  const name = cleanString(input.name);
+  const slug = cleanString(input.slug);
+  const status = cleanString(input.status || "active");
+  const monthlyPrice = Number(input.monthlyPrice || 0);
+  const annualPrice = Number(input.annualPrice || 0);
+
+  if (!name) {
+    errors.push("Plan name is required.");
+  }
+
+  if (!slug) {
+    errors.push("Plan slug is required.");
+  }
+
+  if (slug && content.plans.some((plan) => plan.id !== existing?.id && plan.slug === slug)) {
+    errors.push("Plan slug must be unique.");
+  }
+
+  if (!["active", "draft", "archived"].includes(status)) {
+    errors.push("Plan status is not valid.");
+  }
+
+  if (monthlyPrice < 0 || annualPrice < 0) {
+    errors.push("Plan prices cannot be negative.");
+  }
+
+  return {
+    errors,
+    record: {
+      id: existing?.id || generateId("plan"),
+      name,
+      slug,
+      description: cleanLimitedString(input.description, 500),
+      monthlyPrice,
+      annualPrice,
+      currency: cleanString(input.currency || "USD").toUpperCase(),
+      artistLimit: Number(input.artistLimit || 1),
+      galleryLimit: Number(input.galleryLimit || 1),
+      artworkLimit: Number(input.artworkLimit || 12),
+      mediaStorageLimit: Number(input.mediaStorageLimit || 250),
+      featuredGalleryEligible: parseBoolean(input.featuredGalleryEligible),
+      customDomainEligible: parseBoolean(input.customDomainEligible),
+      status,
+      displayOrder: Number(input.displayOrder || 0),
+      createdAt: existing?.createdAt || nowIso(),
+      updatedAt: nowIso()
+    }
+  };
+}
+
+function upsertPlan(input, session) {
+  const content = loadContent();
+  const existing = input.id ? content.plans.find((plan) => plan.id === input.id) : null;
+  const { errors, record } = validatePlan(input, content, existing);
+
+  if (errors.length) {
+    return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors };
+  }
+
+  if (existing) {
+    const index = content.plans.findIndex((plan) => plan.id === existing.id);
+    content.plans[index] = { ...existing, ...record };
+  } else {
+    content.plans.push(record);
+  }
+
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: session?.email || adminEmail,
+    action: existing ? "plan.updated" : "plan.created",
+    targetType: "plan",
+    targetId: record.id,
+    summary: `${existing ? "Updated" : "Created"} plan ${record.name}`
+  });
+  trimOperationalLogs(content);
+  saveContent(content, "plan-save");
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Plan saved successfully.",
+    content
   };
 }
 
@@ -1759,6 +2078,37 @@ function upsertRecord(resource, input) {
     collection[index] = { ...existing, ...record, protected: existing.protected };
   } else {
     collection.push(record);
+  }
+
+  if (resource === "artist" && existing && (
+    existing.planId !== record.planId ||
+    existing.billingStatus !== record.billingStatus ||
+    existing.subscriptionStatus !== record.subscriptionStatus
+  )) {
+    addNotification(content, {
+      audience: "artist",
+      artistId: record.id,
+      type: "plan_changed",
+      title: "Billing status updated",
+      message: "Your plan or billing status was updated by The Galleria.Art.",
+      link: "/artist/billing/",
+      relatedType: "artist",
+      relatedId: record.id
+    });
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action: "artist.billing.updated",
+      targetType: "artist",
+      targetId: record.id,
+      summary: `Billing updated for ${record.name}`,
+      metadata: {
+        previousPlanId: existing.planId || "",
+        nextPlanId: record.planId || "",
+        previousBillingStatus: existing.billingStatus || "",
+        nextBillingStatus: record.billingStatus || ""
+      }
+    });
   }
 
   addAuditEvent(content, {
@@ -3248,6 +3598,13 @@ function publicSafeContent(content) {
   return {
     ...safeContent,
     emailStatus: emailServiceStatus(),
+    billingStatus: billingProviderStatus(),
+    artistBilling: content.artists.map((artist) => ({
+      artistId: artist.id,
+      plan: artistPlan(content, artist),
+      usage: artistUsage(content, artist.id),
+      warnings: usageWarnings(artistPlan(content, artist), artistUsage(content, artist.id))
+    })),
     adminAccounts: (adminAccounts || []).map((account) => ({
       id: account.id,
       email: account.email,
@@ -3355,6 +3712,8 @@ function buildArtistPortalContent(context) {
       lastLoginAt: context.account.lastLoginAt
     },
     artist: context.artist,
+    plans: activePlans(context.content),
+    billing: billingSnapshot(context.content, context.artist),
     galleries,
     artwork,
     media: artistScopedMedia(context.content, context.artist, galleries, artwork),
@@ -3773,6 +4132,19 @@ function handleAdminApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "POST" && pathname === "/admin/api/plans") {
+    collectJson(request, response, (input) => {
+      const result = upsertPlan(input, adminSession);
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        errors: result.errors || [],
+        content: publicSafeContent(result.content || loadContent())
+      });
+    });
+    return;
+  }
+
   const saveMatch = pathname.match(/^\/admin\/api\/(artists|galleries|artwork)$/);
   if (request.method === "POST" && saveMatch) {
     const resource = saveMatch[1] === "artists" ? "artist" : saveMatch[1] === "galleries" ? "gallery" : "artwork";
@@ -3994,6 +4366,15 @@ function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/robots.txt") {
     sendRobots(response);
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "HEAD") && (pathname === "/pricing/" || pathname === "/pricing")) {
+    if (pathname === "/pricing") {
+      redirect(response, "/pricing/", 301);
+      return;
+    }
+    sendPricingPage(response);
     return;
   }
 

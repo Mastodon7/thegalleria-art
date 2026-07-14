@@ -4,21 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Artist Galleries | The Galleria.Art</title>
+  <title>Billing | The Galleria.Art Artist Portal</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="admin-page artist-portal-page" data-artist-view="galleries">
+<body class="admin-page artist-portal-page" data-artist-view="billing">
   <div class="admin-shell">
     <header class="admin-header">
       <a class="brand-link" href="/">The Galleria.Art</a>
       <nav class="admin-nav artist-nav" aria-label="Artist navigation">
         <a href="/artist/">Dashboard</a>
         <a href="/artist/profile/">Profile</a>
-        <a aria-current="page" href="/artist/galleries/">Galleries</a>
+        <a href="/artist/galleries/">Galleries</a>
         <a href="/artist/artwork/">Artwork</a>
         <a href="/artist/media/">Media</a>
         <a href="/artist/inquiries/">Inquiries</a>
-        <a href="/artist/billing/">Billing</a>
+        <a aria-current="page" href="/artist/billing/">Billing</a>
         <a id="artist-public-view" href="/">Public View</a>
       </nav>
       <form action="/artist/logout" method="post">
@@ -26,37 +26,18 @@
       </form>
     </header>
 
-    <main class="admin-dashboard" aria-labelledby="artist-galleries-title">
+    <main class="admin-dashboard" aria-labelledby="artist-billing-title">
       <div class="admin-dashboard-heading">
         <div>
           <p class="section-kicker">Artist Portal</p>
-          <h1 id="artist-galleries-title">Galleries</h1>
+          <h1 id="artist-billing-title">Billing</h1>
           <p class="admin-muted">Logged in as {{ARTIST_EMAIL}}</p>
         </div>
       </div>
+
       <section class="admin-panel">
-        <h2>Your Galleries</h2>
-        <div class="admin-table-wrap">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>Title</th>
-                <th>Slug</th>
-                <th>Status</th>
-                <th>Featured</th>
-                <th>Artwork</th>
-                <th>Public Link</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="artist-galleries-table"></tbody>
-          </table>
-        </div>
-      </section>
-      <section class="admin-panel">
-        <h2>Edit Gallery</h2>
-        <form class="admin-record-form" id="artist-gallery-form"></form>
-        <button class="admin-primary-action" type="submit" form="artist-gallery-form">Save Gallery</button>
+        <h2>Current Plan</h2>
+        <div class="review-status-panel" id="artist-billing-panel"></div>
       </section>
     </main>
   </div>

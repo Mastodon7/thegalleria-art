@@ -1,9 +1,13 @@
 (function () {
   const statusOptions = ["draft", "pending_review", "approved", "published", "changes_requested", "archived"];
+  const planStatusOptions = ["active", "draft", "archived"];
+  const billingStatusOptions = ["trial", "active", "past_due", "canceled", "comped", "legacy", "demo", "not_configured"];
+  const subscriptionStatusOptions = ["trialing", "active", "past_due", "canceled", "incomplete", "none", "not_configured"];
   const invitationOptions = ["current", "invited", "pending", "accepted", "none"];
   const inquiryStatusOptions = ["new", "reviewed", "replied", "archived", "spam"];
   const state = {
     artists: [],
+    plans: [],
     galleries: [],
     artwork: [],
     media: [],
@@ -14,6 +18,8 @@
     emailLog: [],
     auditLog: [],
     emailStatus: {},
+    billingStatus: {},
+    artistBilling: [],
     statusHistory: [],
     selectedInquiryId: "",
     selectedReviewId: ""
@@ -126,6 +132,21 @@
 
   function accountByArtistId(id) {
     return state.artistAccounts.find((account) => account.artistId === id);
+  }
+
+  function planById(id) {
+    return state.plans.find((plan) => plan.id === id);
+  }
+
+  function billingForArtist(id) {
+    return state.artistBilling.find((billing) => billing.artistId === id) || {};
+  }
+
+  function formatPlanPrice(plan) {
+    if (!plan) {
+      return "-";
+    }
+    return `${plan.currency || "USD"} ${Number(plan.monthlyPrice || 0).toLocaleString()}/mo`;
   }
 
   function invitationByArtistId(id) {
@@ -328,6 +349,7 @@
 
   function applyContent(content) {
     state.artists = content.artists || [];
+    state.plans = content.plans || [];
     state.galleries = content.galleries || [];
     state.artwork = content.artwork || [];
     state.media = content.media || [];
@@ -338,6 +360,8 @@
     state.emailLog = content.emailLog || [];
     state.auditLog = content.auditLog || [];
     state.emailStatus = content.emailStatus || {};
+    state.billingStatus = content.billingStatus || {};
+    state.artistBilling = content.artistBilling || [];
     state.statusHistory = content.statusHistory || [];
     if (state.selectedInquiryId && !state.inquiries.some((inquiry) => inquiry.id === state.selectedInquiryId)) {
       state.selectedInquiryId = "";
@@ -521,6 +545,10 @@
     setText("settings-public-contact-email", state.emailStatus.publicContactEmail || "-");
     setText("settings-email-configured", state.emailStatus.configured ? "Configured" : "Not Configured");
     setText("settings-email-mode", `Sending mode: ${state.emailStatus.mode || "log-only"}`);
+    setText("settings-billing-configured", state.billingStatus.configured ? "Configured" : "Not Configured");
+    setText("settings-billing-mode", `Billing mode: ${state.billingStatus.mode || "disabled"}`);
+    setText("settings-default-plan", state.billingStatus.defaultPlanSlug || "-");
+    setText("settings-trial-days", `${state.billingStatus.defaultTrialDays || 0} days`);
 
     const list = document.getElementById("settings-email-log");
     if (list) {
@@ -540,6 +568,56 @@
         </article>
       `).join("") : '<p class="empty-state">No email events have been recorded yet.</p>';
     }
+  }
+
+  function renderPlanForm(plan = {}) {
+    const form = document.getElementById("plan-form");
+    if (!form) {
+      return;
+    }
+
+    form.innerHTML = `
+      <input name="id" type="hidden" value="${attr(plan.id)}">
+      ${field("name", "Plan Name", plan.name)}
+      ${field("slug", "Slug", plan.slug)}
+      ${field("description", "Description", plan.description)}
+      ${field("monthlyPrice", "Monthly Price", plan.monthlyPrice || 0, "number")}
+      ${field("annualPrice", "Annual Price", plan.annualPrice || 0, "number")}
+      ${field("currency", "Currency", plan.currency || "USD")}
+      ${field("artistLimit", "Artist Limit", plan.artistLimit || 1, "number")}
+      ${field("galleryLimit", "Gallery Limit", plan.galleryLimit || 1, "number")}
+      ${field("artworkLimit", "Artwork Limit", plan.artworkLimit || 12, "number")}
+      ${field("mediaStorageLimit", "Media Storage Limit MB", plan.mediaStorageLimit || 250, "number")}
+      ${checkbox("featuredGalleryEligible", "Featured Gallery Eligible", plan.featuredGalleryEligible)}
+      ${checkbox("customDomainEligible", "Custom Domain Eligible", plan.customDomainEligible)}
+      ${select("status", "Status", plan.status || "active", planStatusOptions.map((item) => ({ value: item, label: item })))}
+      ${field("displayOrder", "Display Order", plan.displayOrder || 0, "number")}
+    `;
+  }
+
+  function renderPlans() {
+    const table = document.getElementById("plans-table");
+    if (!table) {
+      return;
+    }
+
+    const plans = state.plans.slice().sort((left, right) => Number(left.displayOrder || 0) - Number(right.displayOrder || 0));
+    table.innerHTML = plans.length ? plans.map((plan) => `
+      <tr>
+        <td>${escapeHtml(plan.name)}</td>
+        <td>${escapeHtml(plan.slug)}</td>
+        <td>${escapeHtml(formatPlanPrice(plan))}</td>
+        <td>${plan.annualPrice ? `${escapeHtml(plan.currency || "USD")} ${Number(plan.annualPrice).toLocaleString()}` : "-"}</td>
+        <td>${badge(plan.status || "draft")}</td>
+        <td>${Number(plan.galleryLimit || 0)} galleries<br>${Number(plan.artworkLimit || 0)} artwork<br>${Number(plan.mediaStorageLimit || 0)} MB</td>
+        <td>${escapeHtml(plan.displayOrder)}</td>
+        <td class="admin-actions">
+          <button type="button" data-edit-plan="${attr(plan.id)}">Edit</button>
+        </td>
+      </tr>
+    `).join("") : '<tr><td colspan="8">No plans have been configured yet.</td></tr>';
+
+    renderPlanForm(plans[0] || {});
   }
 
   function renderAudit() {
@@ -588,6 +666,7 @@
       return;
     }
 
+    const planOptions = state.plans.map((plan) => ({ value: plan.id, label: plan.name }));
     form.innerHTML = `
       <input name="id" type="hidden" value="${attr(artist.id)}">
       ${field("name", "Name", artist.name)}
@@ -604,6 +683,14 @@
       ${field("socialLinks", "Instagram / Social Link", (artist.socialLinks || []).join(", "))}
       ${select("status", "Status", artist.status || "draft", statusOptions.map((item) => ({ value: item, label: item })))}
       ${select("invitationStatus", "Invitation Status", artist.invitationStatus || "none", invitationOptions.map((item) => ({ value: item, label: item })))}
+      ${select("planId", "Billing Plan", artist.planId || planOptions[0]?.value || "", planOptions)}
+      ${select("billingStatus", "Billing Status", artist.billingStatus || "not_configured", billingStatusOptions.map((item) => ({ value: item, label: item })))}
+      ${select("subscriptionStatus", "Subscription Status", artist.subscriptionStatus || "not_configured", subscriptionStatusOptions.map((item) => ({ value: item, label: item })))}
+      ${field("trialStartAt", "Trial Start", artist.trialStartAt)}
+      ${field("trialEndAt", "Trial End", artist.trialEndAt)}
+      ${field("currentPeriodStart", "Current Period Start", artist.currentPeriodStart)}
+      ${field("currentPeriodEnd", "Current Period End", artist.currentPeriodEnd)}
+      ${checkbox("cancelAtPeriodEnd", "Cancel at Period End", artist.cancelAtPeriodEnd)}
       ${checkbox("featured", "Featured", artist.featured)}
       ${textarea("shortDescription", "Short Description", artist.shortDescription)}
       ${textarea("bio", "Long Bio / Artist Statement", artist.bio)}
@@ -619,6 +706,9 @@
     table.innerHTML = state.artists.map((artist) => {
       const account = accountByArtistId(artist.id);
       const invitation = invitationByArtistId(artist.id);
+      const billing = billingForArtist(artist.id);
+      const plan = billing.plan || planById(artist.planId);
+      const usage = billing.usage || {};
       const acceptedOrLogin = account?.lastLoginAt || account?.acceptedAt || invitation?.acceptedAt || "";
       return `
         <tr>
@@ -629,6 +719,8 @@
         <td>${badge(artist.status)}</td>
         <td>${yesNo(artist.featured)}</td>
         <td>${account ? badge(account.status || "active") : badge(invitation?.status || artist.invitationStatus || "none")}</td>
+        <td>${escapeHtml(plan?.name || "No plan")}<br>${badge(artist.billingStatus || "not_configured")}</td>
+        <td>${Number(usage.galleries || 0)} galleries<br>${Number(usage.artwork || 0)} artwork<br>${Number(usage.media || 0)} media<br>${Number(usage.storageMb || 0)} MB</td>
         <td>${escapeHtml(profileCompleteness(artist))}</td>
         <td>${escapeHtml(formatDate(acceptedOrLogin))}</td>
         <td>${artist.status === "published" ? `<a href="${publicArtistUrl(artist)}">${publicArtistUrl(artist)}</a>` : "Not public"}</td>
@@ -1017,6 +1109,7 @@
   function renderAll() {
     renderDashboard();
     renderMediaOwnerSelect();
+    renderPlans();
     renderArtists();
     renderGalleries();
     renderArtwork();
@@ -1064,6 +1157,16 @@
 
     updateFromPayload(payload);
     showMessage(payload.ok ? "success" : "error", payload.message || "Inquiry update failed.");
+  }
+
+  async function savePlan(form) {
+    const payload = await api("/admin/api/plans", {
+      method: "POST",
+      body: JSON.stringify(formData(form))
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Plan save failed.", payload.errors);
   }
 
   async function saveReviewAction(form) {
@@ -1168,6 +1271,7 @@
       const reviewView = event.target.closest("[data-view-review]");
       const notificationRead = event.target.closest("[data-read-notification]");
       const copyEmail = event.target.closest("[data-copy-email]");
+      const planEdit = event.target.closest("[data-edit-plan]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -1214,8 +1318,14 @@
       if (copyEmail) {
         copyPath(copyEmail.dataset.copyEmail);
       }
+      if (planEdit) {
+        renderPlanForm(state.plans.find((plan) => plan.id === planEdit.dataset.editPlan) || {});
+      }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
+      }
+      if (event.target.id === "add-plan") {
+        renderPlanForm({});
       }
       if (event.target.id === "add-gallery") {
         renderGalleryForm({});
@@ -1259,6 +1369,7 @@
     const artistForm = document.getElementById("artist-form");
     const galleryForm = document.getElementById("gallery-form");
     const artworkForm = document.getElementById("artwork-form");
+    const planForm = document.getElementById("plan-form");
     const mediaUploadForm = document.getElementById("media-upload-form");
     const invitationForm = document.getElementById("invitation-form");
 
@@ -1275,6 +1386,11 @@
     artworkForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       save("artwork", artworkForm, "/admin/api/artwork");
+    });
+
+    planForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      savePlan(planForm);
     });
 
     mediaUploadForm?.addEventListener("submit", (event) => {
