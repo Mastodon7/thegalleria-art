@@ -8,6 +8,8 @@
     artwork: [],
     media: [],
     inquiries: [],
+    invitations: [],
+    artistAccounts: [],
     selectedInquiryId: ""
   };
 
@@ -116,6 +118,26 @@
     return state.artwork.find((artwork) => artwork.id === id);
   }
 
+  function accountByArtistId(id) {
+    return state.artistAccounts.find((account) => account.artistId === id);
+  }
+
+  function invitationByArtistId(id) {
+    return sortedInvitations().find((invitation) => invitation.artistId === id);
+  }
+
+  function profileCompleteness(artist) {
+    const checks = [
+      artist.name,
+      artist.professionalTitle,
+      artist.contactEmail,
+      artist.shortDescription,
+      artist.heroImage
+    ];
+    const complete = checks.filter(Boolean).length;
+    return `${complete}/${checks.length}`;
+  }
+
   function sortedInquiries() {
     return state.inquiries.slice().sort((left, right) =>
       String(right.createdAt || "").localeCompare(String(left.createdAt || ""))
@@ -144,6 +166,16 @@
     const subject = encodeURIComponent(["The Galleria.Art Inquiry", related.artist, related.artwork || related.gallery].filter(Boolean).join(" - "));
     const body = encodeURIComponent(`Hello ${inquiry.visitorName || ""},\n\nThank you for your inquiry about ${[related.artist, related.artwork || related.gallery].filter(Boolean).join(" / ") || "The Galleria.Art"}.\n\n`);
     return `mailto:${encodeURIComponent(inquiry.visitorEmail)}?subject=${subject}&body=${body}`;
+  }
+
+  function sortedInvitations() {
+    return state.invitations.slice().sort((left, right) =>
+      String(right.createdAt || "").localeCompare(String(left.createdAt || ""))
+    );
+  }
+
+  function invitationLink(invitation) {
+    return invitation.token ? `${window.location.origin}/invite/${encodeURIComponent(invitation.token)}` : "";
   }
 
   function setText(id, value) {
@@ -269,6 +301,8 @@
     state.artwork = content.artwork || [];
     state.media = content.media || [];
     state.inquiries = content.inquiries || [];
+    state.invitations = content.invitations || [];
+    state.artistAccounts = content.artistAccounts || [];
     if (state.selectedInquiryId && !state.inquiries.some((inquiry) => inquiry.id === state.selectedInquiryId)) {
       state.selectedInquiryId = "";
     }
@@ -446,14 +480,21 @@
       return;
     }
 
-    table.innerHTML = state.artists.map((artist) => `
-      <tr>
+    table.innerHTML = state.artists.map((artist) => {
+      const account = accountByArtistId(artist.id);
+      const invitation = invitationByArtistId(artist.id);
+      const acceptedOrLogin = account?.lastLoginAt || account?.acceptedAt || invitation?.acceptedAt || "";
+      return `
+        <tr>
           <td>${escapeHtml(artist.name)}${artist.demo ? " <span class=\"admin-badge\">Demo</span>" : ""}</td>
         <td>${escapeHtml(artist.slug)}</td>
         <td>${escapeHtml(artist.professionalTitle)}</td>
         <td>${escapeHtml([artist.city, artist.region].filter(Boolean).join(", "))}</td>
         <td>${badge(artist.status)}</td>
         <td>${yesNo(artist.featured)}</td>
+        <td>${account ? badge(account.status || "active") : badge(invitation?.status || artist.invitationStatus || "none")}</td>
+        <td>${escapeHtml(profileCompleteness(artist))}</td>
+        <td>${escapeHtml(formatDate(acceptedOrLogin))}</td>
         <td>${artist.status === "published" ? `<a href="${publicArtistUrl(artist)}">${publicArtistUrl(artist)}</a>` : "Not public"}</td>
         <td>${formatDate(artist.updatedAt)}</td>
         <td class="admin-actions">
@@ -462,7 +503,8 @@
           <button type="button" data-archive-artist="${attr(artist.id)}"${artist.protected ? " disabled title=\"Seed record is protected\"" : ""}>Archive</button>
         </td>
       </tr>
-    `).join("");
+      `;
+    }).join("");
 
     renderArtistForm(state.artists[0] || {});
   }
@@ -718,6 +760,34 @@
     `;
   }
 
+  function renderInvitations() {
+    const table = document.getElementById("invitations-table");
+    if (!table) {
+      return;
+    }
+
+    const invitations = sortedInvitations();
+    table.innerHTML = invitations.length ? invitations.map((invitation) => {
+      const artist = artistById(invitation.artistId);
+      const link = invitationLink(invitation);
+      return `
+        <tr>
+          <td>${escapeHtml(invitation.email)}</td>
+          <td>${artist ? escapeHtml(artist.name) : "Not linked yet"}</td>
+          <td>${badge(invitation.status || "pending")}</td>
+          <td>${escapeHtml(formatDate(invitation.createdAt))}</td>
+          <td>${escapeHtml(formatDate(invitation.expiresAt))}</td>
+          <td>${escapeHtml(formatDate(invitation.acceptedAt))}</td>
+          <td>${escapeHtml(messagePreview(invitation.notes, 90))}</td>
+          <td class="admin-actions">
+            <button type="button" data-copy-invitation="${attr(link)}"${link ? "" : " disabled"}>Copy Link</button>
+            <button type="button" data-revoke-invitation="${attr(invitation.id)}"${invitation.status === "pending" ? "" : " disabled"}>Revoke</button>
+          </td>
+        </tr>
+      `;
+    }).join("") : '<tr><td colspan="8">No invitations have been created yet.</td></tr>';
+  }
+
   function renderAll() {
     renderDashboard();
     renderMediaOwnerSelect();
@@ -726,6 +796,7 @@
     renderArtwork();
     renderMedia();
     renderInquiries();
+    renderInvitations();
   }
 
   function updateFromPayload(payload) {
@@ -776,6 +847,41 @@
     showMessage(payload.ok ? "success" : "error", payload.message || "Archive failed.");
   }
 
+  async function createInvitation(form) {
+    const payload = await api("/admin/api/invitations", {
+      method: "POST",
+      body: JSON.stringify(formData(form))
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Invitation creation failed.", payload.errors);
+
+    const createdMessage = document.getElementById("invitation-created-message");
+    if (createdMessage && payload.ok) {
+      createdMessage.hidden = false;
+      createdMessage.innerHTML = `
+        <strong>Invitation link created.</strong>
+        <span>${escapeHtml(payload.invitationUrl)}</span>
+        <button type="button" data-copy-invitation="${attr(payload.invitationUrl)}">Copy Link</button>
+      `;
+      form.reset();
+    }
+  }
+
+  async function revokeInvitation(id) {
+    if (!window.confirm("Revoke this invitation? The link will stop working.")) {
+      return;
+    }
+
+    const payload = await api(`/admin/api/invitations/${encodeURIComponent(id)}/revoke`, {
+      method: "POST",
+      body: "{}"
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Invitation revoke failed.");
+  }
+
   async function uploadMedia(form) {
     const payload = await uploadApi("/admin/api/media/upload", new FormData(form));
     updateFromPayload(payload);
@@ -804,6 +910,8 @@
       const artworkArchive = event.target.closest("[data-archive-artwork]");
       const mediaArchive = event.target.closest("[data-archive-media]");
       const copyButton = event.target.closest("[data-copy-path]");
+      const inviteCopy = event.target.closest("[data-copy-invitation]");
+      const inviteRevoke = event.target.closest("[data-revoke-invitation]");
       const inquiryView = event.target.closest("[data-view-inquiry]");
       const inquiryArchive = event.target.closest("[data-archive-inquiry]");
 
@@ -830,6 +938,12 @@
       }
       if (copyButton) {
         copyPath(copyButton.dataset.copyPath);
+      }
+      if (inviteCopy) {
+        copyPath(inviteCopy.dataset.copyInvitation);
+      }
+      if (inviteRevoke) {
+        revokeInvitation(inviteRevoke.dataset.revokeInvitation);
       }
       if (inquiryView) {
         renderInquiryDetail(inquiryView.dataset.viewInquiry);
@@ -875,6 +989,7 @@
     const galleryForm = document.getElementById("gallery-form");
     const artworkForm = document.getElementById("artwork-form");
     const mediaUploadForm = document.getElementById("media-upload-form");
+    const invitationForm = document.getElementById("invitation-form");
 
     artistForm?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -894,6 +1009,11 @@
     mediaUploadForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       uploadMedia(mediaUploadForm);
+    });
+
+    invitationForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      createInvitation(invitationForm);
     });
 
     document.addEventListener("submit", (event) => {

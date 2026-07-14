@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Invitations | The Galleria.Art Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav" aria-label="Admin navigation">
+        <a href="/admin/">Dashboard</a>
+        <a href="/admin/artists/">Artists</a>
+        <a href="/admin/galleries/">Galleries</a>
+        <a href="/admin/artwork/">Artwork</a>
+        <a href="/admin/media/">Media</a>
+        <a href="/admin/inquiries/">Inquiries</a>
+        <a aria-current="page" href="/admin/invitations/">Invitations</a>
+        <a href="/admin/settings/">Settings</a>
+      </nav>
+      <form action="/admin/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="invitations-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Artist Onboarding</p>
+          <h1 id="invitations-title">Invitations</h1>
+          <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
+        </div>
+      </div>
+
+      <section class="admin-panel" aria-labelledby="create-invitation-title">
+        <h2 id="create-invitation-title">Create Invitation</h2>
+        <p class="admin-muted">Create a private invitation link. Email delivery is not connected yet, so copy the generated link and send it manually.</p>
+        <form class="admin-record-form" id="invitation-form">
+          <label>
+            <span>Artist Email</span>
+            <input name="email" type="email" required>
+          </label>
+          <label>
+            <span>Expiration Date Optional</span>
+            <input name="expiresAt" type="date">
+          </label>
+          <label>
+            <span>Artist Name Optional</span>
+            <input name="artistName">
+          </label>
+          <label>
+            <span>Professional Title Optional</span>
+            <input name="professionalTitle">
+          </label>
+          <label class="admin-field-wide">
+            <span>Notes Optional</span>
+            <textarea name="notes"></textarea>
+          </label>
+        </form>
+        <button class="admin-primary-action" type="submit" form="invitation-form">Create Invitation</button>
+        <p class="admin-message success" id="invitation-created-message" hidden></p>
+      </section>
+
+      <section class="admin-panel" aria-labelledby="invitation-list-title">
+        <h2 id="invitation-list-title">Invitation List</h2>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Artist</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Expires</th>
+                <th>Accepted</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="invitations-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

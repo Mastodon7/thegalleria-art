@@ -360,6 +360,31 @@
         </article>
       `).join("");
     }
+
+    const checklist = document.getElementById("artist-onboarding-checklist");
+    if (checklist) {
+      const hasProfile = Boolean(state.artist.name && state.artist.professionalTitle && state.artist.contactEmail && state.artist.shortDescription);
+      const hasHeroImage = Boolean(state.artist.heroImage);
+      const hasGallery = state.galleries.length > 0;
+      const hasArtwork = state.artwork.some((artwork) => artwork.image && artwork.title);
+      const canPreview = state.artist.status === "published";
+      const submitted = ["pending", "accepted", "current"].includes(state.artist.invitationStatus) && hasProfile && hasGallery && hasArtwork;
+      const items = [
+        { label: "Complete profile", done: hasProfile, href: "/artist/profile/" },
+        { label: "Add hero image", done: hasHeroImage, href: "/artist/profile/" },
+        { label: "Create first gallery", done: hasGallery, href: "/artist/galleries/" },
+        { label: "Upload artwork", done: hasArtwork, href: "/artist/artwork/" },
+        { label: "Preview public page", done: canPreview, href: publicArtistUrl() },
+        { label: "Submit for review", done: submitted, href: "/artist/profile/" }
+      ];
+
+      checklist.innerHTML = items.map((item) => `
+        <a class="onboarding-checklist-item ${item.done ? "complete" : ""}" href="${attr(item.href)}">
+          <span aria-hidden="true">${item.done ? "Done" : "Open"}</span>
+          <strong>${escapeHtml(item.label)}</strong>
+        </a>
+      `).join("");
+    }
   }
 
   function renderProfileForm() {

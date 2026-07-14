@@ -997,6 +997,28 @@ a {
   margin-bottom: 18px;
 }
 
+#invitation-created-message {
+  display: grid;
+  gap: 10px;
+}
+
+#invitation-created-message span {
+  color: #d7ccb9;
+  overflow-wrap: anywhere;
+}
+
+#invitation-created-message button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid rgba(185, 151, 77, .34);
+  background: transparent;
+  color: #f8f1e6;
+  cursor: pointer;
+  font-size: .68rem;
+  text-transform: uppercase;
+}
+
 .admin-record-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1226,6 +1248,65 @@ a {
   margin: 0;
   color: #d7ccb9;
   line-height: 1.45;
+}
+
+.onboarding-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 12px;
+}
+
+.onboarding-checklist-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: center;
+  min-height: 62px;
+  padding: 14px;
+  border: 1px solid rgba(185, 151, 77, .24);
+  background: rgba(11, 10, 8, .6);
+  color: #f8f1e6;
+  text-decoration: none;
+}
+
+.onboarding-checklist-item span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 48px;
+  min-height: 28px;
+  border: 1px solid rgba(185, 151, 77, .34);
+  color: #b9974d;
+  font-size: .66rem;
+  text-transform: uppercase;
+}
+
+.onboarding-checklist-item strong {
+  font: 400 1.02rem/1.25 Georgia, serif;
+}
+
+.onboarding-checklist-item.complete {
+  border-color: rgba(127, 190, 144, .42);
+}
+
+.onboarding-checklist-item.complete span {
+  border-color: rgba(127, 190, 144, .48);
+  color: #dbf0df;
+}
+
+.invite-shell {
+  width: min(100%, 980px);
+}
+
+.invite-card {
+  width: min(100%, 820px);
+}
+
+.invite-accept-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.invite-accept-form label {
+  min-width: 0;
 }
 
 .dynamic-artist-hero {
@@ -2267,7 +2348,8 @@ a {
   .admin-settings-grid,
   .admin-upload-form,
   .admin-image-field,
-  .inquiry-form {
+  .inquiry-form,
+  .invite-accept-form {
     grid-template-columns: 1fr;
   }
 

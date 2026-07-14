@@ -27,10 +27,12 @@ const sessionMaxAgeSeconds = 60 * 60 * 8;
 const validStatuses = new Set(["draft", "published", "archived"]);
 const validInvitationStatuses = new Set(["current", "invited", "pending", "accepted", "none"]);
 const validInquiryStatuses = new Set(["new", "reviewed", "replied", "archived", "spam"]);
+const validArtistInvitationStatuses = new Set(["pending", "accepted", "expired", "revoked"]);
 const inquiryRateLimit = new Map();
 const inquiryRateLimitWindowMs = 10 * 60 * 1000;
 const inquiryRateLimitMax = 6;
 const maxInquiryMessageLength = 3000;
+const invitationDefaultDays = 14;
 const allowedImageTypes = new Map([
   ["image/jpeg", ".jpg"],
   ["image/png", ".png"],
@@ -187,6 +189,7 @@ function normalizeContent(content) {
     artwork: Array.isArray(content.artwork) ? content.artwork : [],
     media: Array.isArray(content.media) ? content.media : [],
     inquiries: Array.isArray(content.inquiries) ? content.inquiries : [],
+    invitations: Array.isArray(content.invitations) ? content.invitations : [],
     artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : []
   };
 }
@@ -216,7 +219,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "galleries", "artwork", "media", "inquiries", "artistAccounts"].forEach((collection) => {
+  ["artists", "galleries", "artwork", "media", "inquiries", "invitations", "artistAccounts"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -228,11 +231,40 @@ function mergeMissingSeedRecords(content, seed) {
   return changed;
 }
 
+function futureIso(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
+function generateInvitationToken() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+function ensureInvitationTokens(content) {
+  let changed = false;
+
+  content.invitations.forEach((invitation) => {
+    if (!invitation.token && invitation.status === "pending") {
+      invitation.token = generateInvitationToken();
+      changed = true;
+    }
+
+    if (!invitation.expiresAt && invitation.status === "pending") {
+      invitation.expiresAt = futureIso(invitationDefaultDays);
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
 function ensureContentStore() {
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(mediaDir, { recursive: true });
   fs.mkdirSync(tempUploadDir, { recursive: true });
   const seed = normalizeContent(readSeedContent());
+  ensureInvitationTokens(seed);
 
   if (!fs.existsSync(dataFile)) {
     writeContent(seed);
@@ -240,7 +272,10 @@ function ensureContentStore() {
   }
 
   const content = normalizeContent(JSON.parse(fs.readFileSync(dataFile, "utf8")));
-  if (mergeMissingSeedRecords(content, seed)) {
+  const mergedSeed = mergeMissingSeedRecords(content, seed);
+  const generatedInvitations = ensureInvitationTokens(content);
+  const changed = mergedSeed || generatedInvitations;
+  if (changed) {
     writeContent(content, { backup: true, reason: "seed-merge" });
   }
 }
@@ -1174,6 +1209,10 @@ function hasValidInquiryStatus(value) {
   return validInquiryStatuses.has(value);
 }
 
+function hasValidArtistInvitationStatus(value) {
+  return validArtistInvitationStatuses.has(value);
+}
+
 function generateId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -1767,6 +1806,429 @@ function updateInquiry(id, input, options = {}) {
   };
 }
 
+function requestOrigin(request) {
+  const proto = request.headers["x-forwarded-proto"] || (request.socket.encrypted ? "https" : "http");
+  return `${proto}://${request.headers.host || "localhost"}`;
+}
+
+function invitationUrl(request, invitation) {
+  return `${requestOrigin(request)}/invite/${encodeURIComponent(invitation.token)}`;
+}
+
+function slugify(value) {
+  return String(value || "artist")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64) || "artist";
+}
+
+function uniqueArtistSlug(content, value, existingId = "") {
+  const base = slugify(value);
+  let slug = base;
+  let count = 2;
+
+  while (content.artists.some((artist) => artist.id !== existingId && artist.slug === slug)) {
+    slug = `${base}-${count}`;
+    count += 1;
+  }
+
+  return slug;
+}
+
+function parseExpiration(value) {
+  const raw = cleanString(value);
+  if (!raw) {
+    return futureIso(invitationDefaultDays);
+  }
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    date.setHours(23, 59, 59, 999);
+  }
+
+  return date.toISOString();
+}
+
+function invitationIsExpired(invitation) {
+  return Boolean(invitation?.expiresAt && new Date(invitation.expiresAt).getTime() < Date.now());
+}
+
+function refreshInvitationStatus(content, invitation) {
+  if (invitation?.status === "pending" && invitationIsExpired(invitation)) {
+    invitation.status = "expired";
+    invitation.updatedAt = nowIso();
+    saveContent(content, "invitation-expired");
+  }
+
+  return invitation;
+}
+
+function createDraftArtistForInvitation(content, input, email) {
+  const name = cleanString(input.artistName);
+  if (!name) {
+    return "";
+  }
+
+  const now = nowIso();
+  const slug = uniqueArtistSlug(content, name);
+  const artist = {
+    id: generateId("artist"),
+    name,
+    slug,
+    canonicalPath: `/${slug}/`,
+    professionalTitle: cleanString(input.professionalTitle),
+    city: "",
+    region: "",
+    country: "",
+    medium: "",
+    category: "",
+    heroImage: "",
+    shortDescription: "",
+    bio: "",
+    contactEmail: email,
+    website: "",
+    socialLinks: [],
+    status: "draft",
+    featured: false,
+    invitationStatus: "pending",
+    protected: false,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  content.artists.push(artist);
+  return artist.id;
+}
+
+function createInvitation(input, session, request) {
+  const content = loadContent();
+  const errors = [];
+  const email = cleanLimitedString(input.email, 160).toLowerCase();
+  const expiresAt = parseExpiration(input.expiresAt);
+  const now = nowIso();
+
+  if (!email) {
+    errors.push("Artist email is required.");
+  } else if (!isValidEmail(email)) {
+    errors.push("Enter a valid artist email.");
+  }
+
+  if (!expiresAt) {
+    errors.push("Expiration date is not valid.");
+  } else if (new Date(expiresAt).getTime() <= Date.now()) {
+    errors.push("Expiration date must be in the future.");
+  }
+
+  if (email && content.invitations.some((invitation) =>
+    invitation.email.toLowerCase() === email &&
+    invitation.status === "pending" &&
+    !invitationIsExpired(invitation)
+  )) {
+    errors.push("A pending invitation already exists for this email.");
+  }
+
+  if (errors.length) {
+    return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors };
+  }
+
+  const artistId = createDraftArtistForInvitation(content, input, email);
+  const invitation = {
+    id: generateId("invitation"),
+    email,
+    artistId,
+    invitedByAdminId: session?.email || adminEmail,
+    token: generateInvitationToken(),
+    status: "pending",
+    createdAt: now,
+    updatedAt: now,
+    expiresAt,
+    acceptedAt: "",
+    revokedAt: "",
+    notes: cleanLimitedString(input.notes, 1500)
+  };
+
+  content.invitations.push(invitation);
+  saveContent(content, "invitation-create");
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Invitation created.",
+    invitation,
+    invitationUrl: invitationUrl(request, invitation),
+    content
+  };
+}
+
+function revokeInvitation(id) {
+  const content = loadContent();
+  const invitation = content.invitations.find((item) => item.id === id);
+
+  if (!invitation) {
+    return { ok: false, statusCode: 404, message: "Invitation was not found." };
+  }
+
+  if (invitation.status !== "pending") {
+    return { ok: false, statusCode: 409, message: "Only pending invitations can be revoked." };
+  }
+
+  invitation.status = "revoked";
+  invitation.revokedAt = nowIso();
+  invitation.updatedAt = nowIso();
+  saveContent(content, "invitation-revoke");
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Invitation revoked.",
+    content
+  };
+}
+
+function findInvitationByToken(content, token) {
+  const cleanToken = cleanString(token);
+  if (!cleanToken) {
+    return null;
+  }
+
+  return content.invitations.find((invitation) => invitation.token === cleanToken) || null;
+}
+
+function hashArtistPassword(password, salt) {
+  return crypto.scryptSync(password, salt, 64).toString("hex");
+}
+
+function validateInvitePassword(password, confirmPassword) {
+  const errors = [];
+
+  if (!password || password.length < 10) {
+    errors.push("Password must be at least 10 characters.");
+  }
+
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    errors.push("Password must include at least one letter and one number.");
+  }
+
+  if (password !== confirmPassword) {
+    errors.push("Password and confirmation must match.");
+  }
+
+  return errors;
+}
+
+function invitationUnavailableReason(invitation) {
+  if (!invitation) {
+    return "This invitation link was not found.";
+  }
+
+  if (invitation.status === "accepted") {
+    return "This invitation has already been accepted.";
+  }
+
+  if (invitation.status === "revoked") {
+    return "This invitation has been revoked.";
+  }
+
+  if (invitation.status === "expired") {
+    return "This invitation has expired.";
+  }
+
+  return "";
+}
+
+function renderInvitePage(invitation, options = {}) {
+  const artist = options.artist || {};
+  const errors = options.errors || [];
+  const unavailable = invitationUnavailableReason(invitation);
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Artist Invitation | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page admin-login-page invite-page">
+  <main class="admin-login-shell invite-shell">
+    <section class="admin-card admin-login-card invite-card" aria-labelledby="invite-title">
+      <p class="section-kicker">Artist Invitation</p>
+      <h1 id="invite-title">Join The Galleria.Art</h1>
+      ${unavailable ? `
+        <p class="admin-alert">${escapeHtml(unavailable)}</p>
+        <a class="admin-return" href="/contact/">Contact The Galleria.Art</a>
+      ` : `
+        <p class="admin-muted">Invitation for ${escapeHtml(invitation.email)}. Set your password and confirm the basic artist profile details below.</p>
+        ${errors.length ? `<div class="admin-message error"><strong>Please fix the highlighted fields.</strong><ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></div>` : ""}
+        <form class="admin-form invite-accept-form" action="/invite/${encodeURIComponent(invitation.token)}" method="post">
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" value="${escapeHtml(invitation.email)}" disabled>
+          </label>
+          <label>
+            <span>Artist Name</span>
+            <input name="artistName" value="${escapeHtml(options.input?.artistName ?? artist.name ?? "")}" required>
+          </label>
+          <label>
+            <span>Professional Title</span>
+            <input name="professionalTitle" value="${escapeHtml(options.input?.professionalTitle ?? artist.professionalTitle ?? "")}">
+          </label>
+          <label>
+            <span>City</span>
+            <input name="city" value="${escapeHtml(options.input?.city ?? artist.city ?? "")}">
+          </label>
+          <label>
+            <span>State / Region</span>
+            <input name="region" value="${escapeHtml(options.input?.region ?? artist.region ?? "")}">
+          </label>
+          <label>
+            <span>Medium</span>
+            <input name="medium" value="${escapeHtml(options.input?.medium ?? artist.medium ?? "")}">
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" autocomplete="new-password" required>
+          </label>
+          <label>
+            <span>Confirm Password</span>
+            <input name="confirmPassword" type="password" autocomplete="new-password" required>
+          </label>
+          <button class="admin-submit home-button" type="submit">Accept Invitation</button>
+        </form>
+        <p class="admin-note">Passwords are stored as server-side hashes. Your profile will remain private until it is ready to publish.</p>
+      `}
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function sendInvitePage(request, response, token) {
+  const content = loadContent();
+  const invitation = refreshInvitationStatus(content, findInvitationByToken(content, token));
+  const artist = invitation?.artistId ? content.artists.find((item) => item.id === invitation.artistId) : null;
+
+  response.writeHead(invitation && !invitationUnavailableReason(invitation) ? 200 : 404, {
+    "Content-Type": "text/html; charset=utf-8"
+  });
+  response.end(renderInvitePage(invitation, { artist }));
+}
+
+function acceptInvitation(request, response, token) {
+  collectBody(request, (body) => {
+    const input = Object.fromEntries(new URLSearchParams(body));
+    const content = loadContent();
+    const invitation = refreshInvitationStatus(content, findInvitationByToken(content, token));
+    const unavailable = invitationUnavailableReason(invitation);
+
+    if (unavailable) {
+      response.writeHead(409, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(renderInvitePage(invitation));
+      return;
+    }
+
+    const errors = validateInvitePassword(input.password || "", input.confirmPassword || "");
+    const artistName = cleanLimitedString(input.artistName, 140);
+
+    if (!artistName) {
+      errors.push("Artist name is required.");
+    }
+
+    if (errors.length) {
+      const artist = invitation.artistId ? content.artists.find((item) => item.id === invitation.artistId) : null;
+      response.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(renderInvitePage(invitation, { artist, errors, input }));
+      return;
+    }
+
+    const now = nowIso();
+    let artist = invitation.artistId ? content.artists.find((item) => item.id === invitation.artistId) : null;
+
+    if (!artist) {
+      const slug = uniqueArtistSlug(content, artistName);
+      artist = {
+        id: generateId("artist"),
+        name: artistName,
+        slug,
+        canonicalPath: `/${slug}/`,
+        professionalTitle: cleanLimitedString(input.professionalTitle, 140),
+        city: cleanLimitedString(input.city, 90),
+        region: cleanLimitedString(input.region, 90),
+        country: "",
+        medium: cleanLimitedString(input.medium, 140),
+        category: "",
+        heroImage: "",
+        shortDescription: "",
+        bio: "",
+        contactEmail: invitation.email,
+        website: "",
+        socialLinks: [],
+        status: "draft",
+        featured: false,
+        invitationStatus: "accepted",
+        protected: false,
+        createdAt: now,
+        updatedAt: now
+      };
+      content.artists.push(artist);
+      invitation.artistId = artist.id;
+    } else {
+      artist.name = artistName;
+      artist.slug = artist.slug || uniqueArtistSlug(content, artistName, artist.id);
+      artist.canonicalPath = artist.canonicalPath || `/${artist.slug}/`;
+      artist.professionalTitle = cleanLimitedString(input.professionalTitle, 140);
+      artist.city = cleanLimitedString(input.city, 90);
+      artist.region = cleanLimitedString(input.region, 90);
+      artist.medium = cleanLimitedString(input.medium, 140);
+      artist.contactEmail = artist.contactEmail || invitation.email;
+      artist.status = artist.status === "published" ? "published" : "draft";
+      artist.invitationStatus = "accepted";
+      artist.updatedAt = now;
+    }
+
+    const salt = crypto.randomBytes(16).toString("hex");
+    const passwordHash = hashArtistPassword(input.password || "", salt);
+    let account = content.artistAccounts.find((item) => item.email.toLowerCase() === invitation.email.toLowerCase());
+
+    if (!account) {
+      account = {
+        id: generateId("artist-account"),
+        artistId: artist.id,
+        email: invitation.email,
+        passwordHash,
+        passwordSalt: salt,
+        status: "active",
+        demo: false,
+        createdAt: now,
+        updatedAt: now,
+        acceptedAt: now,
+        lastLoginAt: now
+      };
+      content.artistAccounts.push(account);
+    } else {
+      account.artistId = artist.id;
+      account.passwordHash = passwordHash;
+      account.passwordSalt = salt;
+      account.status = "active";
+      account.acceptedAt = account.acceptedAt || now;
+      account.lastLoginAt = now;
+      account.updatedAt = now;
+    }
+
+    invitation.status = "accepted";
+    invitation.acceptedAt = now;
+    invitation.updatedAt = now;
+    saveContent(content, "invitation-accept");
+    redirect(response, "/artist/", 303, {
+      "Set-Cookie": createArtistSessionCookie(account, request)
+    });
+  });
+}
+
 function verifyArtistPassword(password, account) {
   if (!account?.passwordHash || !account?.passwordSalt) {
     return false;
@@ -1786,7 +2248,9 @@ function publicSafeContent(content) {
       status: account.status,
       demo: Boolean(account.demo),
       createdAt: account.createdAt,
-      updatedAt: account.updatedAt
+      updatedAt: account.updatedAt,
+      acceptedAt: account.acceptedAt,
+      lastLoginAt: account.lastLoginAt
     }))
   };
 }
@@ -1857,7 +2321,9 @@ function buildArtistPortalContent(context) {
     account: {
       email: context.account.email,
       demo: Boolean(context.account.demo),
-      status: context.account.status
+      status: context.account.status,
+      acceptedAt: context.account.acceptedAt,
+      lastLoginAt: context.account.lastLoginAt
     },
     artist: context.artist,
     galleries,
@@ -1897,6 +2363,9 @@ function handleArtistLogin(request, response) {
     );
 
     if (account && verifyArtistPassword(password, account)) {
+      account.lastLoginAt = nowIso();
+      account.updatedAt = nowIso();
+      saveContent(content, "artist-login");
       redirect(response, "/artist/", 303, {
         "Set-Cookie": createArtistSessionCookie(account, request)
       });
@@ -2123,6 +2592,7 @@ function handleAdminApi(request, response, pathname) {
   if (!requireAdminForApi(request, response)) {
     return;
   }
+  const adminSession = getSession(request);
 
   if (request.method === "GET" && pathname === "/admin/api/content") {
     sendJson(response, 200, { ok: true, content: publicSafeContent(loadContent()) });
@@ -2181,6 +2651,32 @@ function handleAdminApi(request, response, pathname) {
         message: result.message,
         content: publicSafeContent(result.content || loadContent())
       });
+    });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/admin/api/invitations") {
+    collectJson(request, response, (input) => {
+      const result = createInvitation(input, adminSession, request);
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        errors: result.errors || [],
+        invitationUrl: result.invitationUrl || "",
+        invitation: result.invitation || null,
+        content: publicSafeContent(result.content || loadContent())
+      });
+    });
+    return;
+  }
+
+  const invitationRevokeMatch = pathname.match(/^\/admin\/api\/invitations\/([^/]+)\/revoke$/);
+  if (request.method === "POST" && invitationRevokeMatch) {
+    const result = revokeInvitation(decodeURIComponent(invitationRevokeMatch[1]));
+    sendJson(response, result.statusCode, {
+      ok: result.ok,
+      message: result.message,
+      content: publicSafeContent(result.content || loadContent())
     });
     return;
   }
@@ -2307,6 +2803,17 @@ function handleRequest(request, response) {
 
   if (request.method === "POST" && pathname === "/api/inquiries") {
     handlePublicInquiry(request, response);
+    return;
+  }
+
+  const inviteMatch = pathname.match(/^\/invite\/([^/]+)\/?$/);
+  if (inviteMatch && request.method === "GET") {
+    sendInvitePage(request, response, decodeURIComponent(inviteMatch[1]));
+    return;
+  }
+
+  if (inviteMatch && request.method === "POST") {
+    acceptInvitation(request, response, decodeURIComponent(inviteMatch[1]));
     return;
   }
 

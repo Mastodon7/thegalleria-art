@@ -345,6 +345,22 @@
   ],
   "media": [],
   "inquiries": [],
+  "invitations": [
+    {
+      "id": "invitation-new-artist-demo",
+      "email": "new.artist.demo@thegalleria.art",
+      "artistId": "",
+      "invitedByAdminId": "mc@25mprinting.com",
+      "token": "",
+      "status": "pending",
+      "createdAt": "2026-07-14T00:00:00.000Z",
+      "updatedAt": "2026-07-14T00:00:00.000Z",
+      "expiresAt": "",
+      "acceptedAt": "",
+      "revokedAt": "",
+      "notes": "Demo pending invitation. A secure token is generated into private persistent storage on first run."
+    }
+  ],
   "artistAccounts": [
     {
       "id": "artist-account-maya-rivers-demo",
