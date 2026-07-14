@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Artist Profile | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page artist-portal-page" data-artist-view="profile">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav artist-nav" aria-label="Artist navigation">
+        <a href="/artist/">Dashboard</a>
+        <a aria-current="page" href="/artist/profile/">Profile</a>
+        <a href="/artist/galleries/">Galleries</a>
+        <a href="/artist/artwork/">Artwork</a>
+        <a href="/artist/media/">Media</a>
+        <a id="artist-public-view" href="/">Public View</a>
+      </nav>
+      <form action="/artist/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="artist-profile-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Artist Portal</p>
+          <h1 id="artist-profile-title">Profile</h1>
+          <p class="admin-muted">Logged in as {{ARTIST_EMAIL}}</p>
+        </div>
+      </div>
+      <section class="admin-panel">
+        <h2>Edit Profile</h2>
+        <p class="admin-muted">Profile edits update your managed public artist record. Publishing controls stay with the owner admin.</p>
+        <form class="admin-record-form" id="artist-profile-form"></form>
+        <button class="admin-primary-action" type="submit" form="artist-profile-form">Save Profile</button>
+      </section>
+    </main>
+  </div>
+  <script src="/artist/artist.js"></script>
+</body>
+</html>

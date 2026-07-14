@@ -44,6 +44,17 @@ Phase 6 adds protected media uploads at `/admin/media/`. Uploaded JPG, PNG, and 
 
 For Coolify, the same persistent `/data` mount used for `DATA_DIR` should remain in place. That keeps both `content.json` and uploaded media files outside the transient build output.
 
+## Artist portal demo
+
+Phase 7 adds the first protected artist-facing demo portal at `/artist/login/`.
+
+Demo artist account:
+
+- Email: `demo.artist@thegalleria.art`
+- Temporary password: `DemoArtist123!`
+
+The password is stored in seed data as a server-side hash. The demo artist is Maya Rivers, with a published sample gallery at `/maya-rivers/`. Artist portal edits are scoped to the logged-in artist and do not expose admin tools.
+
 ## Coolify
 
 1. Push this folder to a GitHub repository.

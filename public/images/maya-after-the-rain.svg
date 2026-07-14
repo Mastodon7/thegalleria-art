@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1100" viewBox="0 0 1400 1100" role="img" aria-labelledby="title desc">
+  <title id="title">After the Rain demo placeholder</title>
+  <desc id="desc">Abstract rainy city reflection demo artwork placeholder.</desc>
+  <rect width="1400" height="1100" fill="#101413"/>
+  <linearGradient id="rain" x1="0" x2="1">
+    <stop offset="0" stop-color="#18282d"/>
+    <stop offset=".55" stop-color="#4d5d5f"/>
+    <stop offset="1" stop-color="#141414"/>
+  </linearGradient>
+  <rect x="0" y="0" width="1400" height="1100" fill="url(#rain)"/>
+  <g opacity=".42" stroke="#e7e1d0" stroke-width="7">
+    <path d="M180 70 L95 1010"/>
+    <path d="M390 30 L300 1040"/>
+    <path d="M640 80 L540 1060"/>
+    <path d="M890 40 L780 1060"/>
+    <path d="M1130 90 L990 1035"/>
+  </g>
+  <ellipse cx="710" cy="835" rx="560" ry="120" fill="#0b0d12" opacity=".44"/>
+  <ellipse cx="720" cy="820" rx="420" ry="64" fill="#d8bd74" opacity=".18"/>
+  <path d="M150 740 C330 680 480 790 640 725 S1000 625 1230 760" fill="none" stroke="#d8bd74" stroke-width="20" opacity=".58"/>
+  <text x="95" y="1020" fill="#f8f1e6" font-family="Georgia, serif" font-size="42">DEMO - AFTER THE RAIN</text>
+</svg>

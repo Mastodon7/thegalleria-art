@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1100" viewBox="0 0 1400 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Gold Hour Window demo placeholder</title>
+  <desc id="desc">Abstract window and late-day light demo artwork placeholder.</desc>
+  <rect width="1400" height="1100" fill="#0e0d0b"/>
+  <rect x="150" y="115" width="1100" height="790" fill="#211c18" stroke="#b9974d" stroke-width="16"/>
+  <path d="M210 170 H1190 V850 H210 Z" fill="#2e3a45"/>
+  <rect x="248" y="206" width="280" height="600" fill="#d3a44b" opacity=".72"/>
+  <rect x="560" y="206" width="250" height="600" fill="#ede3cf" opacity=".32"/>
+  <rect x="842" y="206" width="310" height="600" fill="#6a4838" opacity=".76"/>
+  <path d="M160 840 L1250 250" stroke="#f4d989" stroke-width="34" opacity=".58"/>
+  <path d="M430 180 V840 M820 180 V840" stroke="#0e0d0b" stroke-width="18" opacity=".84"/>
+  <text x="105" y="1015" fill="#f8f1e6" font-family="Georgia, serif" font-size="42">DEMO - GOLD HOUR WINDOW</text>
+</svg>

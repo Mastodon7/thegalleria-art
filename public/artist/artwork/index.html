@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Artist Artwork | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page artist-portal-page" data-artist-view="artwork">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav artist-nav" aria-label="Artist navigation">
+        <a href="/artist/">Dashboard</a>
+        <a href="/artist/profile/">Profile</a>
+        <a href="/artist/galleries/">Galleries</a>
+        <a aria-current="page" href="/artist/artwork/">Artwork</a>
+        <a href="/artist/media/">Media</a>
+        <a id="artist-public-view" href="/">Public View</a>
+      </nav>
+      <form action="/artist/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="artist-artwork-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Artist Portal</p>
+          <h1 id="artist-artwork-title">Artwork</h1>
+          <p class="admin-muted">Logged in as {{ARTIST_EMAIL}}</p>
+        </div>
+      </div>
+      <section class="admin-panel">
+        <h2>Your Artwork</h2>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Image</th>
+                <th>Title</th>
+                <th>Gallery</th>
+                <th>Status</th>
+                <th>Order</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="artist-artwork-table"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="admin-panel">
+        <h2>Edit Artwork</h2>
+        <form class="admin-record-form" id="artist-artwork-form"></form>
+        <button class="admin-primary-action" type="submit" form="artist-artwork-form">Save Artwork</button>
+      </section>
+    </main>
+  </div>
+  <script src="/artist/artist.js"></script>
+</body>
+</html>

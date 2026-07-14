@@ -1,6 +1,6 @@
 (function () {
   const statusOptions = ["draft", "published", "archived"];
-  const invitationOptions = ["current", "invited", "pending", "none"];
+  const invitationOptions = ["current", "invited", "pending", "accepted", "none"];
   const state = {
     artists: [],
     galleries: [],
@@ -286,7 +286,7 @@
 
     table.innerHTML = state.artists.map((artist) => `
       <tr>
-        <td>${escapeHtml(artist.name)}</td>
+          <td>${escapeHtml(artist.name)}${artist.demo ? " <span class=\"admin-badge\">Demo</span>" : ""}</td>
         <td>${escapeHtml(artist.slug)}</td>
         <td>${escapeHtml(artist.professionalTitle)}</td>
         <td>${escapeHtml([artist.city, artist.region].filter(Boolean).join(", "))}</td>

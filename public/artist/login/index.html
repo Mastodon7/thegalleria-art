@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Artist Login | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page admin-login-page">
+  <main class="admin-login-shell">
+    <section class="admin-card admin-login-card" aria-labelledby="artist-login-title">
+      <p class="section-kicker">Artist Portal</p>
+      <h1 id="artist-login-title">The Galleria.Art Artist Login</h1>
+      <p class="admin-muted">Private demo access for invited artists to preview profile, gallery, artwork, and media tools.</p>
+      <p class="admin-alert" id="login-error" hidden>Email or password was not recognized.</p>
+
+      <form class="admin-form" action="/artist/login" method="post">
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" autocomplete="username" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="home-button admin-submit" type="submit">Log In</button>
+      </form>
+
+      <p class="admin-note">Demo artist access is invitation-only in this phase.</p>
+      <a class="admin-return" href="/">Return to public site</a>
+    </section>
+  </main>
+
+  <script>
+    if (new URLSearchParams(window.location.search).has("error")) {
+      document.getElementById("login-error").hidden = false;
+    }
+  </script>
+</body>
+</html>

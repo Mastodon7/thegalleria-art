@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1100" viewBox="0 0 1400 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Blue Line Study demo placeholder</title>
+  <desc id="desc">Abstract transit-line demo artwork placeholder.</desc>
+  <rect width="1400" height="1100" fill="#0b0d12"/>
+  <rect x="0" y="120" width="1400" height="170" fill="#182130"/>
+  <rect x="0" y="805" width="1400" height="155" fill="#171511"/>
+  <path d="M-120 760 C190 630 350 390 610 510 S1040 780 1510 320" fill="none" stroke="#2f72a8" stroke-width="92" opacity=".92"/>
+  <path d="M-80 735 C210 620 370 420 610 540 S1000 760 1480 350" fill="none" stroke="#8fbada" stroke-width="22" opacity=".82"/>
+  <rect x="185" y="205" width="180" height="620" fill="#d8bd74" opacity=".78"/>
+  <rect x="560" y="90" width="115" height="830" fill="#e7e1d0" opacity=".5"/>
+  <rect x="945" y="250" width="260" height="560" fill="#744837" opacity=".72"/>
+  <text x="95" y="1020" fill="#f8f1e6" font-family="Georgia, serif" font-size="42">DEMO - BLUE LINE STUDY</text>
+</svg>

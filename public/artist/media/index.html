@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Artist Media | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page artist-portal-page" data-artist-view="media">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav artist-nav" aria-label="Artist navigation">
+        <a href="/artist/">Dashboard</a>
+        <a href="/artist/profile/">Profile</a>
+        <a href="/artist/galleries/">Galleries</a>
+        <a href="/artist/artwork/">Artwork</a>
+        <a aria-current="page" href="/artist/media/">Media</a>
+        <a id="artist-public-view" href="/">Public View</a>
+      </nav>
+      <form action="/artist/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="artist-media-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Artist Portal</p>
+          <h1 id="artist-media-title">Media</h1>
+          <p class="admin-muted">Logged in as {{ARTIST_EMAIL}}</p>
+        </div>
+      </div>
+      <section class="admin-panel">
+        <h2>Referenced Images</h2>
+        <p class="admin-muted">Artist uploads are currently owner-managed until media records receive owner scoping. This page shows images attached to your profile, galleries, and artwork.</p>
+        <div class="admin-media-grid" id="artist-media-grid"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/artist/artist.js"></script>
+</body>
+</html>

@@ -29,18 +29,33 @@
     ].join(" ").toLowerCase();
   }
 
+  function galleryEntries() {
+    return artists.flatMap((artist) =>
+      publishedGalleries(artist).map((gallery) => ({ artist, gallery }))
+    );
+  }
+
+  function entryKeywords(entry) {
+    return [
+      galleryKeywords(entry.artist),
+      entry.gallery.title,
+      entry.gallery.description
+    ].join(" ").toLowerCase();
+  }
+
   function renderGalleryCards(list) {
     galleryList.innerHTML = "";
 
-    list.forEach((artist) => {
+    list.forEach(({ artist, gallery }) => {
       const card = document.createElement("article");
       card.className = "gallery-card";
       card.innerHTML = `
         <div>
           <p>${artist.professionalTitle}</p>
           <h3><a class="gallery-link" href="${artistUrl(artist)}">${artist.name}</a></h3>
+          <p>${gallery.title}</p>
         </div>
-        <a class="card-arrow" href="${artistUrl(artist)}" aria-label="View ${artist.name} gallery">View Gallery</a>
+        <a class="card-arrow" href="${artistUrl(artist)}" aria-label="View ${artist.name} ${gallery.title} gallery">View Gallery</a>
       `;
       galleryList.appendChild(card);
     });
@@ -77,22 +92,23 @@
 
   searchInput.addEventListener("input", () => {
     const query = searchInput.value.trim().toLowerCase();
-    const filteredArtists = query
-      ? artists.filter((artist) => galleryKeywords(artist).includes(query))
-      : artists;
-    renderGalleryCards(filteredArtists);
+    const entries = galleryEntries();
+    const filteredEntries = query
+      ? entries.filter((entry) => entryKeywords(entry).includes(query))
+      : entries;
+    renderGalleryCards(filteredEntries);
   });
 
   exploreButton.addEventListener("click", () => {
-    if (!artists.length) {
+    const entries = galleryEntries();
+    if (!entries.length) {
       return;
     }
 
-    const publishedArtists = artists.filter((artist) => artist.slug && publishedGalleries(artist).length);
-    const randomArtist = publishedArtists[Math.floor(Math.random() * publishedArtists.length)] || artists[0];
-    window.location.href = artistUrl(randomArtist);
+    const randomEntry = entries[Math.floor(Math.random() * entries.length)];
+    window.location.href = artistUrl(randomEntry.artist);
   });
 
-  renderGalleryCards(artists);
+  renderGalleryCards(galleryEntries());
   renderFeaturedGallery();
 }());

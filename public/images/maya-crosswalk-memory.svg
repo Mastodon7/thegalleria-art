@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1100" viewBox="0 0 1400 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Crosswalk Memory demo placeholder</title>
+  <desc id="desc">Abstract crosswalk-inspired demo artwork placeholder.</desc>
+  <rect width="1400" height="1100" fill="#11100e"/>
+  <path d="M0 210 H1400 V420 H0 Z" fill="#25303a"/>
+  <path d="M0 690 H1400 V900 H0 Z" fill="#191d22"/>
+  <g opacity=".88">
+    <rect x="110" y="0" width="86" height="1100" fill="#f2eadb"/>
+    <rect x="305" y="0" width="86" height="1100" fill="#d8bd74"/>
+    <rect x="500" y="0" width="86" height="1100" fill="#f2eadb"/>
+    <rect x="695" y="0" width="86" height="1100" fill="#d8bd74"/>
+    <rect x="890" y="0" width="86" height="1100" fill="#f2eadb"/>
+    <rect x="1085" y="0" width="86" height="1100" fill="#d8bd74"/>
+  </g>
+  <circle cx="1050" cy="315" r="190" fill="#8f4f3b" opacity=".54"/>
+  <path d="M0 980 C300 860 470 1110 700 980 S1080 880 1400 1010" fill="none" stroke="#5d87a6" stroke-width="24" opacity=".55"/>
+  <text x="90" y="1020" fill="#f8f1e6" font-family="Georgia, serif" font-size="42">DEMO - CROSSWALK MEMORY</text>
+</svg>

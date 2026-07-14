@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Artist Dashboard | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page artist-portal-page" data-artist-view="dashboard">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav artist-nav" aria-label="Artist navigation">
+        <a aria-current="page" href="/artist/">Dashboard</a>
+        <a href="/artist/profile/">Profile</a>
+        <a href="/artist/galleries/">Galleries</a>
+        <a href="/artist/artwork/">Artwork</a>
+        <a href="/artist/media/">Media</a>
+        <a id="artist-public-view" href="/">Public View</a>
+      </nav>
+      <form action="/artist/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="artist-dashboard-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Artist Portal</p>
+          <h1 id="artist-dashboard-title">Dashboard</h1>
+          <p class="admin-muted">Logged in as {{ARTIST_EMAIL}}</p>
+        </div>
+      </div>
+
+      <section class="admin-panel">
+        <h2 id="artist-name">Artist</h2>
+        <p class="admin-muted" id="artist-summary"></p>
+      </section>
+
+      <section class="admin-stats" aria-label="Artist overview">
+        <article>
+          <span id="artist-gallery-count">0</span>
+          <p>Galleries</p>
+        </article>
+        <article>
+          <span id="artist-artwork-count">0</span>
+          <p>Artwork Records</p>
+        </article>
+        <article>
+          <span id="artist-profile-status">-</span>
+          <p>Profile Status</p>
+        </article>
+        <article>
+          <span id="artist-invitation-status">-</span>
+          <p>Invitation</p>
+        </article>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Recent Artwork</h2>
+        <div class="artist-recent-list" id="artist-recent-list"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/artist/artist.js"></script>
+</body>
+</html>
