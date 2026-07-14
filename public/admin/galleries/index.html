@@ -30,7 +30,7 @@
           <h1 id="galleries-title">Galleries</h1>
           <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
         </div>
-        <button class="admin-primary-action" type="button" disabled>Add Gallery</button>
+        <button class="admin-primary-action" id="add-gallery" type="button">Add Gallery</button>
       </div>
 
       <section class="admin-panel" aria-labelledby="gallery-list-title">
@@ -45,6 +45,8 @@
                 <th>Status</th>
                 <th>Featured</th>
                 <th>Order</th>
+                <th>Public URL</th>
+                <th>Updated</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -55,13 +57,12 @@
 
       <section class="admin-panel" aria-labelledby="gallery-form-title">
         <h2 id="gallery-form-title">Gallery Edit Foundation</h2>
-        <p class="admin-muted">Read-only seed fields for the future gallery editor. Saving is intentionally not enabled in this phase.</p>
+        <p class="admin-muted">Create or update gallery records. Seed records are protected from archive.</p>
         <form class="admin-record-form" id="gallery-form"></form>
-        <button class="admin-primary-action" type="button" disabled>Save Gallery Later</button>
+        <button class="admin-primary-action" type="submit" form="gallery-form">Save Gallery</button>
       </section>
     </main>
   </div>
-  <script src="/gallery-data.js"></script>
   <script src="/admin/admin.js"></script>
 </body>
 </html>

@@ -30,7 +30,7 @@
           <h1 id="artwork-title">Artwork</h1>
           <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
         </div>
-        <button class="admin-primary-action" type="button" disabled>Add Artwork</button>
+        <button class="admin-primary-action" id="add-artwork" type="button">Add Artwork</button>
       </div>
 
       <section class="admin-panel" aria-labelledby="artwork-list-title">
@@ -47,6 +47,7 @@
                 <th>Location</th>
                 <th>Order</th>
                 <th>Status</th>
+                <th>Updated</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -57,13 +58,12 @@
 
       <section class="admin-panel" aria-labelledby="artwork-form-title">
         <h2 id="artwork-form-title">Artwork Edit Foundation</h2>
-        <p class="admin-muted">Read-only seed fields for the future artwork editor. Saving is intentionally not enabled in this phase.</p>
+        <p class="admin-muted">Create or update artwork records. Seed records are protected from archive.</p>
         <form class="admin-record-form" id="artwork-form"></form>
-        <button class="admin-primary-action" type="button" disabled>Save Artwork Later</button>
+        <button class="admin-primary-action" type="submit" form="artwork-form">Save Artwork</button>
       </section>
     </main>
   </div>
-  <script src="/gallery-data.js"></script>
   <script src="/admin/admin.js"></script>
 </body>
 </html>

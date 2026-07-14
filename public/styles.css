@@ -543,6 +543,32 @@ a {
   line-height: 1.65;
 }
 
+.admin-message {
+  margin-bottom: 24px;
+  padding: 14px 16px;
+  border: 1px solid rgba(185, 151, 77, .36);
+  background: rgba(255, 255, 255, .04);
+  color: #f8f1e6;
+  line-height: 1.5;
+}
+
+.admin-message.success {
+  border-color: rgba(127, 190, 144, .52);
+}
+
+.admin-message.error {
+  border-color: rgba(205, 101, 85, .68);
+}
+
+.admin-message strong {
+  display: block;
+}
+
+.admin-message ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
 .admin-alert {
   margin: 24px 0 0;
   padding: 12px 14px;
@@ -568,7 +594,8 @@ a {
   text-transform: uppercase;
 }
 
-.admin-form input {
+.admin-form input,
+.admin-form select {
   min-height: 52px;
   width: 100%;
   border: 1px solid rgba(185, 151, 77, .38);
@@ -578,7 +605,8 @@ a {
   font: 400 1rem/1.3 Arial, sans-serif;
 }
 
-.admin-form input:focus {
+.admin-form input:focus,
+.admin-form select:focus {
   outline: 2px solid rgba(216, 189, 116, .55);
   outline-offset: 3px;
 }
@@ -813,6 +841,19 @@ a {
   text-transform: uppercase;
 }
 
+.admin-badge.status-draft {
+  color: #d9d0c0;
+}
+
+.admin-badge.status-archived {
+  color: #a99f8c;
+}
+
+.admin-badge.status-published {
+  color: #f8f1e6;
+  border-color: rgba(127, 190, 144, .48);
+}
+
 .admin-actions {
   display: flex;
   flex-wrap: wrap;
@@ -830,6 +871,13 @@ a {
   font-size: .68rem;
   text-decoration: none;
   text-transform: uppercase;
+}
+
+.admin-actions a:hover,
+.admin-actions a:focus-visible,
+.admin-actions button:hover,
+.admin-actions button:focus-visible {
+  background: rgba(185, 151, 77, .16);
 }
 
 .admin-record-form {
@@ -851,6 +899,7 @@ a {
 }
 
 .admin-record-form input,
+.admin-record-form select,
 .admin-record-form textarea {
   width: 100%;
   min-height: 48px;
@@ -861,9 +910,34 @@ a {
   font: 400 .95rem/1.4 Arial, sans-serif;
 }
 
+.admin-record-form select {
+  color-scheme: dark;
+}
+
+.admin-record-form input:focus,
+.admin-record-form select:focus,
+.admin-record-form textarea:focus {
+  outline: 2px solid rgba(216, 189, 116, .55);
+  outline-offset: 3px;
+}
+
 .admin-record-form textarea {
   min-height: 120px;
   resize: vertical;
+}
+
+.admin-checkbox {
+  align-content: end;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  min-height: 48px;
+}
+
+.admin-checkbox input {
+  width: 18px;
+  min-height: 18px;
+  margin: 0;
+  accent-color: #b9974d;
 }
 
 .admin-field-wide {

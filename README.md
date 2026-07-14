@@ -30,7 +30,13 @@ Phase 4 adds protected admin management pages for artists, galleries, artwork, a
 - `/admin/artwork/`
 - `/admin/settings/`
 
-The shared public data model in `public/gallery-data.js` now includes artist, gallery, and artwork records. Public pages filter for published records only. Admin management forms are read-only placeholders in this phase; true create/edit/save behavior will require persistent server-side storage such as a small database or managed data store.
+The shared content model includes artist, gallery, and artwork records. Public pages filter for published records only.
+
+## Persistent content storage
+
+Phase 5 adds writable JSON content storage for artists, galleries, and artwork. The server seeds initial data from `seed-content.json` and writes live content to `DATA_DIR/content.json`.
+
+For Coolify, keep the Dockerfile deployment and mount persistent storage at `/data` or set `DATA_DIR` to another persistent path. The server creates backup files before save/archive writes and does not overwrite existing content on startup.
 
 ## Coolify
 
