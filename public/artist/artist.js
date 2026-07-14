@@ -527,6 +527,21 @@
     return `<p><strong>${escapeHtml(label)}</strong> ${current.toLocaleString()}${cap ? ` / ${cap.toLocaleString()}` : ""}</p>`;
   }
 
+  function renderUsageMetric(metric) {
+    const percent = metric.status === "unlimited" ? 0 : Math.min(Number(metric.percentUsed || 0), 100);
+    const limit = metric.status === "unlimited" ? "Unlimited" : `${Number(metric.limit || 0).toLocaleString()}${metric.unit === "mb" ? " MB" : ""}`;
+    const current = `${Number(metric.current || 0).toLocaleString()}${metric.unit === "mb" ? " MB" : ""}`;
+    return `
+      <article class="usage-meter status-${escapeHtml(metric.status || "ok")}">
+        <div>
+          <strong>${escapeHtml(metric.label)}</strong>
+          <span>${current} / ${escapeHtml(limit)}</span>
+        </div>
+        <div class="usage-bar" aria-hidden="true"><span style="width: ${percent}%"></span></div>
+      </article>
+    `;
+  }
+
   function formatPlanPrice(plan) {
     const amount = Number(plan?.monthlyPrice || 0);
     return amount ? `${escapeHtml(plan.currency || "USD")} ${amount.toLocaleString()} / month` : "By invitation";
@@ -541,6 +556,7 @@
     const billing = state.billing || {};
     const plan = billing.plan || {};
     const usage = billing.usage || {};
+    const evaluation = billing.usageEvaluation || {};
     const provider = billing.providerStatus || {};
     const billingEnabled = Boolean(provider.configured);
     const planOptions = state.plans.length ? state.plans : (plan.id ? [plan] : []);
@@ -554,7 +570,9 @@
         <article>
           <strong>Usage</strong>
           ${usageLine("Galleries", usage.galleries, plan.galleryLimit)}
+          <p><strong>Published Galleries</strong> ${Number(usage.publishedGalleries || 0).toLocaleString()}</p>
           ${usageLine("Artwork", usage.artwork, plan.artworkLimit)}
+          <p><strong>Published Artwork</strong> ${Number(usage.publishedArtwork || 0).toLocaleString()}</p>
           ${usageLine("Media Files", usage.media)}
           ${usageLine("Media Storage MB", usage.storageMb, plan.mediaStorageLimit)}
         </article>
@@ -564,6 +582,12 @@
           ${billing.trialEndAt ? `<p>Trial ends ${escapeHtml(formatDate(billing.trialEndAt))}</p>` : ""}
           ${billing.cancelAtPeriodEnd ? "<p>Cancellation is scheduled at period end.</p>" : ""}
         </article>
+      </div>
+      <div class="review-note-block">
+        <strong>Usage Limits</strong>
+        <div class="usage-meter-grid">
+          ${(evaluation.metrics || []).filter((metric) => ["galleries", "artwork", "media", "storageMb"].includes(metric.key)).map(renderUsageMetric).join("")}
+        </div>
       </div>
       <div class="review-note-block">
         <strong>Plan Options</strong>
@@ -580,12 +604,28 @@
         </div>
         ${billingEnabled ? "" : "<p>Online billing is not enabled yet. Please contact The Galleria.Art.</p>"}
       </div>
-      ${billing.warnings?.length ? `<div class="review-note-block"><strong>Usage notices</strong>${billing.warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}</div>` : ""}
+      ${billing.warnings?.length ? `<div class="review-note-block"><strong>Usage notices</strong>${billing.warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}<p>Need more room? Contact The Galleria.Art and we can adjust the account.</p></div>` : ""}
       <div class="review-status-actions">
         <button type="button" data-billing-portal ${billing.portalAvailable ? "" : "disabled"}>Manage Billing</button>
         <a href="/contact/">Contact About Billing</a>
       </div>
     `;
+  }
+
+  function renderLimitNotice(elementId, keys) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+      return;
+    }
+
+    const metrics = (state.billing?.usageEvaluation?.metrics || [])
+      .filter((metric) => keys.includes(metric.key) && ["near_limit", "over_limit"].includes(metric.status));
+    element.innerHTML = metrics.length ? `
+      <div class="review-note-block">
+        <strong>Plan Limit Notice</strong>
+        ${metrics.map((metric) => `<p>${escapeHtml(metric.label)} is ${metric.status === "over_limit" ? "over" : "near"} the plan limit.</p>`).join("")}
+      </div>
+    ` : "";
   }
 
   function renderGalleryForm(gallery = state.galleries[0] || {}) {
@@ -606,6 +646,7 @@
   }
 
   function renderGalleries() {
+    renderLimitNotice("artist-gallery-limit-warning", ["galleries", "publishedGalleries"]);
     const table = document.getElementById("artist-galleries-table");
     if (!table) {
       return;
@@ -660,6 +701,7 @@
   }
 
   function renderArtwork() {
+    renderLimitNotice("artist-artwork-limit-warning", ["artwork", "publishedArtwork"]);
     const table = document.getElementById("artist-artwork-table");
     if (!table) {
       return;
@@ -688,6 +730,18 @@
   }
 
   function renderMedia() {
+    const warning = document.getElementById("artist-media-limit-warning");
+    if (warning) {
+      const metrics = (state.billing?.usageEvaluation?.metrics || [])
+        .filter((metric) => ["media", "storageMb"].includes(metric.key) && ["near_limit", "over_limit"].includes(metric.status));
+      warning.innerHTML = metrics.length ? `
+        <div class="review-note-block">
+          <strong>Upload Notice</strong>
+          ${metrics.map((metric) => `<p>${escapeHtml(metric.label)} is ${metric.status === "over_limit" ? "over" : "near"} the plan limit.</p>`).join("")}
+        </div>
+      ` : "";
+    }
+
     const grid = document.getElementById("artist-media-grid");
     if (!grid) {
       return;

@@ -276,6 +276,54 @@ a {
   width: fit-content;
 }
 
+.usage-meter-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.usage-meter {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid rgba(185, 151, 77, .22);
+  background: rgba(255, 255, 255, .035);
+}
+
+.usage-meter div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.usage-meter strong {
+  color: #f8f1e6;
+}
+
+.usage-meter span {
+  color: #d7ccb9;
+}
+
+.usage-bar {
+  height: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, .12);
+}
+
+.usage-bar span {
+  display: block;
+  height: 100%;
+  background: #b9974d;
+}
+
+.usage-meter.status-near_limit .usage-bar span {
+  background: #d8bd74;
+}
+
+.usage-meter.status-over_limit .usage-bar span {
+  background: #c96755;
+}
+
 .product-layout {
   display: grid;
   grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);

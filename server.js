@@ -61,6 +61,7 @@ const inquiryRateLimit = new Map();
 const inquiryRateLimitWindowMs = 10 * 60 * 1000;
 const inquiryRateLimitMax = 6;
 const maxInquiryMessageLength = 3000;
+const limitNearThreshold = 0.8;
 const invitationDefaultDays = 14;
 const passwordResetTokenHours = Number(process.env.PASSWORD_RESET_TOKEN_HOURS || 2);
 const allowedImageTypes = new Map([
@@ -290,6 +291,41 @@ function mergeMissingSeedRecords(content, seed) {
   return changed;
 }
 
+function ensurePhase16Defaults(content) {
+  let changed = false;
+  const mediaDefaults = {
+    starter: 50,
+    professional: 250,
+    "gallery-studio": 1000
+  };
+
+  content.plans.forEach((plan) => {
+    if (plan.mediaLimit === undefined) {
+      plan.mediaLimit = mediaDefaults[plan.slug] || 0;
+      changed = true;
+    }
+  });
+
+  content.artists.forEach((artist) => {
+    const shouldIgnore = artist.billingStatus === "legacy" || artist.billingStatus === "comped";
+    [
+      ["ignoreLimits", shouldIgnore],
+      ["customGalleryLimit", 0],
+      ["customArtworkLimit", 0],
+      ["customMediaLimit", 0],
+      ["customStorageLimit", 0],
+      ["limitOverrideNotes", shouldIgnore ? "Legacy or comped account preserved without quota interruption." : ""]
+    ].forEach(([key, value]) => {
+      if (artist[key] === undefined) {
+        artist[key] = value;
+        changed = true;
+      }
+    });
+  });
+
+  return changed;
+}
+
 function futureIso(days) {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -333,7 +369,8 @@ function ensureContentStore() {
   const content = normalizeContent(JSON.parse(fs.readFileSync(dataFile, "utf8")));
   const mergedSeed = mergeMissingSeedRecords(content, seed);
   const generatedInvitations = ensureInvitationTokens(content);
-  const changed = mergedSeed || generatedInvitations;
+  const phase16Defaults = ensurePhase16Defaults(content);
+  const changed = mergedSeed || generatedInvitations || phase16Defaults;
   if (changed) {
     writeContent(content, { backup: true, reason: "seed-merge" });
   }
@@ -485,45 +522,241 @@ function artistPlanOption(plan) {
   };
 }
 
+function mediaStorageBytes(media) {
+  const variantBytes = Object.values(media?.variants || {})
+    .reduce((sum, variant) => sum + Number(variant?.size || 0), 0);
+  return variantBytes || Number(media?.size || media?.originalSize || 0);
+}
+
 function artistUsage(content, artistId) {
-  const galleries = content.galleries.filter((gallery) => gallery.artistId === artistId);
-  const artwork = content.artwork.filter((item) => item.artistId === artistId);
+  const galleries = content.galleries.filter((gallery) => gallery.artistId === artistId && gallery.status !== "archived");
+  const artwork = content.artwork.filter((item) => item.artistId === artistId && item.status !== "archived");
   const media = content.media.filter((item) => item.ownerArtistId === artistId && item.status !== "archived");
-  const storageBytes = media.reduce((sum, item) => sum + Number(item.size || item.originalSize || 0), 0);
+  const storageBytes = media.reduce((sum, item) => sum + mediaStorageBytes(item), 0);
   return {
     galleries: galleries.length,
+    publishedGalleries: galleries.filter((gallery) => gallery.status === "published").length,
+    featuredGalleries: galleries.filter((gallery) => gallery.featured).length,
     artwork: artwork.length,
+    publishedArtwork: artwork.filter((item) => item.status === "published").length,
     media: media.length,
     storageBytes,
     storageMb: Math.ceil(storageBytes / (1024 * 1024))
   };
 }
 
-function usageWarnings(plan, usage) {
-  if (!plan) {
-    return [];
+function artistLimitOverrides(artist = {}) {
+  return {
+    ignoreLimits: parseBoolean(artist.ignoreLimits),
+    customGalleryLimit: Number(artist.customGalleryLimit || 0),
+    customArtworkLimit: Number(artist.customArtworkLimit || 0),
+    customMediaLimit: Number(artist.customMediaLimit || 0),
+    customStorageLimit: Number(artist.customStorageLimit || 0),
+    notes: cleanLimitedString(artist.limitOverrideNotes || "", 700)
+  };
+}
+
+function accountLimitsAreUnlimited(artist = {}) {
+  const billingStatusValue = cleanString(artist.billingStatus);
+  const overrides = artistLimitOverrides(artist);
+  return overrides.ignoreLimits || billingStatusValue === "comped" || billingStatusValue === "legacy";
+}
+
+function planLimitValue(plan, artist, planKey, overrideKey) {
+  const overrides = artistLimitOverrides(artist);
+  const overrideValue = Number(overrides[overrideKey] || 0);
+  return overrideValue > 0 ? overrideValue : Number(plan?.[planKey] || 0);
+}
+
+function quotaMetric(key, label, current, limit, unit = "count") {
+  const numericLimit = Number(limit || 0);
+  const numericCurrent = Number(current || 0);
+  if (numericLimit <= 0) {
+    return { key, label, current: numericCurrent, limit: 0, percentUsed: 0, status: "unlimited", unit };
+  }
+  const percentUsed = Math.round((numericCurrent / numericLimit) * 100);
+  const status = numericCurrent > numericLimit ? "over_limit" : percentUsed >= limitNearThreshold * 100 ? "near_limit" : "ok";
+  return { key, label, current: numericCurrent, limit: numericLimit, percentUsed, status, unit };
+}
+
+function usageEvaluation(content, artist) {
+  const plan = artistPlan(content, artist);
+  const usage = artistUsage(content, artist.id);
+  const overrides = artistLimitOverrides(artist);
+  const unlimited = accountLimitsAreUnlimited(artist);
+  const metrics = [
+    quotaMetric("galleries", "Galleries", usage.galleries, unlimited ? 0 : planLimitValue(plan, artist, "galleryLimit", "customGalleryLimit")),
+    quotaMetric("artwork", "Artwork", usage.artwork, unlimited ? 0 : planLimitValue(plan, artist, "artworkLimit", "customArtworkLimit")),
+    quotaMetric("media", "Media Files", usage.media, unlimited ? 0 : planLimitValue(plan, artist, "mediaLimit", "customMediaLimit")),
+    quotaMetric("storageMb", "Media Storage", usage.storageMb, unlimited ? 0 : planLimitValue(plan, artist, "mediaStorageLimit", "customStorageLimit"), "mb"),
+    quotaMetric("publishedGalleries", "Published Galleries", usage.publishedGalleries, unlimited ? 0 : planLimitValue(plan, artist, "galleryLimit", "customGalleryLimit")),
+    quotaMetric("publishedArtwork", "Published Artwork", usage.publishedArtwork, unlimited ? 0 : planLimitValue(plan, artist, "artworkLimit", "customArtworkLimit"))
+  ];
+  const over = metrics.filter((metric) => metric.status === "over_limit");
+  const near = metrics.filter((metric) => metric.status === "near_limit");
+
+  return {
+    usage,
+    plan,
+    overrides,
+    unlimited,
+    status: unlimited ? "unlimited" : over.length ? "over_limit" : near.length ? "near_limit" : "ok",
+    metrics,
+    warnings: [
+      ...near.map((metric) => `${metric.label} is near the ${metric.limit.toLocaleString()} limit.`),
+      ...over.map((metric) => `${metric.label} is over the ${metric.limit.toLocaleString()} limit.`)
+    ]
+  };
+}
+
+function metricByKey(evaluation, key) {
+  return evaluation.metrics.find((metric) => metric.key === key) || null;
+}
+
+function formatLimitValue(metric) {
+  const value = Number(metric?.limit || 0).toLocaleString();
+  return metric?.unit === "mb" ? `${value} MB` : value;
+}
+
+function blockedLimitMessage(metric) {
+  return `${metric.label} has reached the ${formatLimitValue(metric)} plan limit. Please contact The Galleria.Art to adjust the account.`;
+}
+
+function evaluateLimitForIncrement(evaluation, key, increment) {
+  const metric = metricByKey(evaluation, key);
+  if (!metric || metric.status === "unlimited" || Number(metric.limit || 0) <= 0) {
+    return { ok: true };
   }
 
-  const checks = [
-    ["galleries", plan.galleryLimit, "gallery"],
-    ["artwork", plan.artworkLimit, "artwork"],
-    ["storageMb", plan.mediaStorageLimit, "media storage"]
-  ];
+  const nextValue = Number(metric.current || 0) + Number(increment || 0);
+  if (nextValue > Number(metric.limit || 0)) {
+    return {
+      ok: false,
+      metric: {
+        ...metric,
+        current: nextValue,
+        percentUsed: Math.round((nextValue / Number(metric.limit || 1)) * 100),
+        status: "over_limit"
+      }
+    };
+  }
 
-  return checks
-    .filter(([, limit]) => Number(limit || 0) > 0)
-    .filter(([key, limit]) => Number(usage[key] || 0) >= Number(limit) * 0.9)
-    .map(([, limit, label]) => `${label} usage is near the ${limit} limit.`);
+  return { ok: true };
+}
+
+function enforceArtistLimit(content, artistId, action, options = {}) {
+  const artist = content.artists.find((item) => item.id === artistId);
+  if (!artist) {
+    return { ok: false, statusCode: 404, message: "Artist was not found." };
+  }
+
+  const evaluation = usageEvaluation(content, artist);
+  const checks = {
+    gallery_create: [["galleries", 1]],
+    artwork_create: [["artwork", 1]],
+    media_upload: [
+      ["media", 1],
+      ["storageMb", Math.ceil(Number(options.estimatedStorageBytes || 0) / (1024 * 1024))]
+    ],
+    publish_gallery: [["publishedGalleries", options.alreadyPublished ? 0 : 1]],
+    publish_artwork: [["publishedArtwork", options.alreadyPublished ? 0 : 1]]
+  }[action] || [];
+
+  for (const [key, increment] of checks) {
+    const result = evaluateLimitForIncrement(evaluation, key, increment);
+    if (!result.ok) {
+      return {
+        ok: false,
+        statusCode: 409,
+        message: blockedLimitMessage(result.metric),
+        metric: result.metric,
+        evaluation
+      };
+    }
+  }
+
+  return { ok: true, evaluation };
+}
+
+function recordLimitBlocked(content, artist, action, result, actorType = "system", actorId = "") {
+  if (!artist) {
+    return;
+  }
+
+  addNotification(content, {
+    audience: "artist",
+    artistId: artist.id,
+    type: "limit_blocked",
+    title: "Plan limit reached",
+    message: result.message,
+    link: "/artist/billing/",
+    relatedType: "artist",
+    relatedId: `${artist.id}:${action}:${result.metric?.key || "limit"}`
+  });
+  addAuditEvent(content, {
+    actorType,
+    actorId: actorId || artist.contactEmail || artist.id,
+    action: `${action}.blocked_by_limit`,
+    targetType: "artist",
+    targetId: artist.id,
+    summary: result.message,
+    metadata: {
+      metric: result.metric?.key || "",
+      limit: result.metric?.limit || 0,
+      attemptedValue: result.metric?.current || 0
+    }
+  });
+}
+
+function addLimitThresholdNotifications(content, artist, evaluation) {
+  if (evaluation.unlimited) {
+    return;
+  }
+
+  evaluation.metrics
+    .filter((metric) => metric.status === "near_limit" || metric.status === "over_limit")
+    .forEach((metric) => {
+      const relatedId = `${artist.id}:${metric.key}:${metric.status}`;
+      if (content.notifications.some((notification) => notification.type === "limit_threshold" && notification.relatedId === relatedId)) {
+        return;
+      }
+      addNotification(content, {
+        audience: "artist",
+        artistId: artist.id,
+        type: "limit_threshold",
+        title: metric.status === "over_limit" ? "Plan limit exceeded" : "Plan limit approaching",
+        message: metric.status === "over_limit"
+          ? `${metric.label} is over the ${formatLimitValue(metric)} plan limit.`
+          : `${metric.label} is near the ${formatLimitValue(metric)} plan limit.`,
+        link: "/artist/billing/",
+        relatedType: "artist",
+        relatedId
+      });
+      addAuditEvent(content, {
+        actorType: "system",
+        actorId: "quota",
+        action: metric.status === "over_limit" ? "account.moved_over_limit" : "account.near_limit",
+        targetType: "artist",
+        targetId: artist.id,
+        summary: `${artist.name} ${metric.status === "over_limit" ? "moved over" : "is near"} ${metric.label}.`,
+        metadata: {
+          metric: metric.key,
+          current: metric.current,
+          limit: metric.limit
+        }
+      });
+    });
 }
 
 function billingSnapshot(content, artist) {
   const plan = artistPlan(content, artist);
-  const usage = artistUsage(content, artist.id);
+  const evaluation = usageEvaluation(content, artist);
   const readiness = stripeReadiness(content);
   return {
     plan,
-    usage,
-    warnings: usageWarnings(plan, usage),
+    usage: evaluation.usage,
+    usageEvaluation: evaluation,
+    warnings: evaluation.warnings,
     billingStatus: artist.billingStatus || "not_configured",
     subscriptionStatus: artist.subscriptionStatus || "not_configured",
     trialStartAt: artist.trialStartAt || "",
@@ -786,6 +1019,12 @@ function publicRecord(record) {
     cancelAtPeriodEnd,
     externalCustomerId,
     externalSubscriptionId,
+    ignoreLimits,
+    customGalleryLimit,
+    customArtworkLimit,
+    customMediaLimit,
+    customStorageLimit,
+    limitOverrideNotes,
     ...safeRecord
   } = record || {};
 
@@ -1132,7 +1371,8 @@ function renderPricingPage(content) {
               <ul>
                 <li>${Number(plan.galleryLimit || 0).toLocaleString()} ${Number(plan.galleryLimit || 0) === 1 ? "gallery" : "galleries"}</li>
                 <li>${Number(plan.artworkLimit || 0).toLocaleString()} artwork records</li>
-                <li>${Number(plan.mediaStorageLimit || 0).toLocaleString()} MB media foundation</li>
+                <li>${Number(plan.mediaLimit || 0) ? `${Number(plan.mediaLimit).toLocaleString()} media files` : "Flexible media library"}</li>
+                <li>${Number(plan.mediaStorageLimit || 0).toLocaleString()} MB media storage</li>
                 ${plan.featuredGalleryEligible ? "<li>Featured gallery eligible</li>" : ""}
                 ${plan.customDomainEligible ? "<li>Custom domain eligible</li>" : ""}
               </ul>
@@ -1740,6 +1980,12 @@ async function processMediaUpload(upload, options = {}) {
       targetId: mediaId,
       summary: `Media uploaded: ${upload.originalFilename}`
     });
+    if (options.ownerArtistId) {
+      const artist = finalContent.artists.find((item) => item.id === options.ownerArtistId);
+      if (artist) {
+        addLimitThresholdNotifications(finalContent, artist, usageEvaluation(finalContent, artist));
+      }
+    }
     trimOperationalLogs(finalContent);
     saveContent(finalContent, "media-processing-ready");
     return { ok: true, media: readyRecord, content: finalContent };
@@ -2089,6 +2335,12 @@ function validateArtist(input, content, existing) {
       cancelAtPeriodEnd: parseBoolean(input.cancelAtPeriodEnd ?? existing?.cancelAtPeriodEnd),
       externalCustomerId: cleanString(input.externalCustomerId || existing?.externalCustomerId),
       externalSubscriptionId: cleanString(input.externalSubscriptionId || existing?.externalSubscriptionId),
+      ignoreLimits: parseBoolean(input.ignoreLimits ?? existing?.ignoreLimits),
+      customGalleryLimit: Number(input.customGalleryLimit || existing?.customGalleryLimit || 0),
+      customArtworkLimit: Number(input.customArtworkLimit || existing?.customArtworkLimit || 0),
+      customMediaLimit: Number(input.customMediaLimit || existing?.customMediaLimit || 0),
+      customStorageLimit: Number(input.customStorageLimit || existing?.customStorageLimit || 0),
+      limitOverrideNotes: cleanLimitedString(input.limitOverrideNotes || existing?.limitOverrideNotes, 700),
       protected: Boolean(existing?.protected),
       createdAt: existing?.createdAt || nowIso(),
       updatedAt: nowIso()
@@ -2142,6 +2394,7 @@ function validatePlan(input, content, existing) {
       artistLimit: Number(input.artistLimit || 1),
       galleryLimit: Number(input.galleryLimit || 1),
       artworkLimit: Number(input.artworkLimit || 12),
+      mediaLimit: Number(input.mediaLimit || existing?.mediaLimit || 0),
       mediaStorageLimit: Number(input.mediaStorageLimit || 250),
       featuredGalleryEligible: parseBoolean(input.featuredGalleryEligible),
       customDomainEligible: parseBoolean(input.customDomainEligible),
@@ -2324,6 +2577,33 @@ function upsertRecord(resource, input) {
     return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors };
   }
 
+  if (resource === "gallery" || resource === "artwork") {
+    const artist = content.artists.find((item) => item.id === record.artistId);
+    const actions = [];
+    if (!existing) {
+      actions.push(resource === "gallery" ? "gallery_create" : "artwork_create");
+    }
+    if (record.status === "published" && existing?.status !== "published") {
+      actions.push(resource === "gallery" ? "publish_gallery" : "publish_artwork");
+    }
+
+    for (const action of actions) {
+      const limitResult = enforceArtistLimit(content, record.artistId, action, { alreadyPublished: existing?.status === "published" });
+      if (!limitResult.ok) {
+        recordLimitBlocked(content, artist, action, limitResult, "admin", adminEmail);
+        trimOperationalLogs(content);
+        saveContent(content, `${resource}-limit-blocked`);
+        return {
+          ok: false,
+          statusCode: limitResult.statusCode,
+          message: limitResult.message,
+          errors: [limitResult.message],
+          content
+        };
+      }
+    }
+  }
+
   if (existing) {
     const index = collection.findIndex((item) => item.id === existing.id);
     collection[index] = { ...existing, ...record, protected: existing.protected };
@@ -2360,6 +2640,31 @@ function upsertRecord(resource, input) {
         nextBillingStatus: record.billingStatus || ""
       }
     });
+  }
+
+  if (resource === "artist" && existing && (
+    parseBoolean(existing.ignoreLimits) !== parseBoolean(record.ignoreLimits) ||
+    Number(existing.customGalleryLimit || 0) !== Number(record.customGalleryLimit || 0) ||
+    Number(existing.customArtworkLimit || 0) !== Number(record.customArtworkLimit || 0) ||
+    Number(existing.customMediaLimit || 0) !== Number(record.customMediaLimit || 0) ||
+    Number(existing.customStorageLimit || 0) !== Number(record.customStorageLimit || 0) ||
+    cleanString(existing.limitOverrideNotes) !== cleanString(record.limitOverrideNotes)
+  )) {
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action: "limit.override.changed",
+      targetType: "artist",
+      targetId: record.id,
+      summary: `Limit override changed for ${record.name}`
+    });
+  }
+
+  if ((resource === "artist" || resource === "gallery" || resource === "artwork") && record.artistId) {
+    const artist = content.artists.find((item) => item.id === record.artistId);
+    if (artist) {
+      addLimitThresholdNotifications(content, artist, usageEvaluation(content, artist));
+    }
   }
 
   addAuditEvent(content, {
@@ -2449,6 +2754,25 @@ function handleMediaUpload(request, response, options = {}) {
     if (ownerArtistId && !loadContent().artists.some((artist) => artist.id === ownerArtistId)) {
       sendJson(response, 422, { ok: false, message: "Selected media owner was not found." });
       return;
+    }
+
+    if (ownerArtistId) {
+      const content = loadContent();
+      const artist = content.artists.find((item) => item.id === ownerArtistId);
+      const limitResult = enforceArtistLimit(content, ownerArtistId, "media_upload", {
+        estimatedStorageBytes: upload.buffer.length
+      });
+      if (!limitResult.ok) {
+        recordLimitBlocked(content, artist, "media_upload", limitResult, options.uploadedBy === "artist" ? "artist" : "admin", options.uploadedBy === "artist" ? ownerArtistId : adminEmail);
+        trimOperationalLogs(content);
+        saveContent(content, "media-upload-blocked");
+        sendJson(response, limitResult.statusCode, {
+          ok: false,
+          message: limitResult.message,
+          content: contentForResponse(content)
+        });
+        return;
+      }
     }
 
     const result = await processMediaUpload(upload, {
@@ -3009,6 +3333,22 @@ function createDraftArtistForInvitation(content, input, email) {
     status: "draft",
     featured: false,
     invitationStatus: "pending",
+    planId: defaultPlan(content)?.id || "",
+    billingStatus: "trial",
+    subscriptionStatus: "trialing",
+    trialStartAt: now,
+    trialEndAt: new Date(Date.now() + defaultTrialDays * 24 * 60 * 60 * 1000).toISOString(),
+    currentPeriodStart: "",
+    currentPeriodEnd: "",
+    cancelAtPeriodEnd: false,
+    externalCustomerId: "",
+    externalSubscriptionId: "",
+    ignoreLimits: false,
+    customGalleryLimit: 0,
+    customArtworkLimit: 0,
+    customMediaLimit: 0,
+    customStorageLimit: 0,
+    limitOverrideNotes: "",
     protected: false,
     createdAt: now,
     updatedAt: now
@@ -3791,6 +4131,25 @@ function adminReviewRecord(type, id, input, session) {
     return { ok: false, statusCode: 422, message: "Review action is not valid." };
   }
 
+  if (action === "published" && (type === "gallery" || type === "artwork")) {
+    const artistId = reviewRecordArtistId(record, type);
+    const artist = content.artists.find((item) => item.id === artistId);
+    const limitResult = enforceArtistLimit(content, artistId, type === "gallery" ? "publish_gallery" : "publish_artwork", {
+      alreadyPublished: record.status === "published"
+    });
+    if (!limitResult.ok) {
+      recordLimitBlocked(content, artist, `${type}_publish`, limitResult, "admin", session?.email || adminEmail);
+      trimOperationalLogs(content);
+      saveContent(content, "review-limit-blocked");
+      return {
+        ok: false,
+        statusCode: limitResult.statusCode,
+        message: limitResult.message,
+        content
+      };
+    }
+  }
+
   const now = nowIso();
   transitionReviewRecord(content, type, record, action, session?.email || adminEmail, note, {
     reviewedAt: now,
@@ -3854,7 +4213,8 @@ function publicSafeContent(content) {
       artistId: artist.id,
       plan: artistPlan(content, artist),
       usage: artistUsage(content, artist.id),
-      warnings: usageWarnings(artistPlan(content, artist), artistUsage(content, artist.id))
+      usageEvaluation: usageEvaluation(content, artist),
+      warnings: usageEvaluation(content, artist).warnings
     })),
     billingEvents: (content.billingEvents || []).slice(-100).reverse(),
     adminAccounts: (adminAccounts || []).map((account) => ({

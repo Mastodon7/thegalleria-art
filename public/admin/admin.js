@@ -663,6 +663,7 @@
       ${field("artistLimit", "Artist Limit", plan.artistLimit || 1, "number")}
       ${field("galleryLimit", "Gallery Limit", plan.galleryLimit || 1, "number")}
       ${field("artworkLimit", "Artwork Limit", plan.artworkLimit || 12, "number")}
+      ${field("mediaLimit", "Media File Limit", plan.mediaLimit || 0, "number")}
       ${field("mediaStorageLimit", "Media Storage Limit MB", plan.mediaStorageLimit || 250, "number")}
       ${checkbox("featuredGalleryEligible", "Featured Gallery Eligible", plan.featuredGalleryEligible)}
       ${checkbox("customDomainEligible", "Custom Domain Eligible", plan.customDomainEligible)}
@@ -693,7 +694,7 @@
         <td>${escapeHtml(formatPlanPrice(plan))}</td>
         <td>${plan.annualPrice ? `${escapeHtml(plan.currency || "USD")} ${Number(plan.annualPrice).toLocaleString()}` : "-"}</td>
         <td>${badge(plan.status || "draft")}</td>
-        <td>${Number(plan.galleryLimit || 0)} galleries<br>${Number(plan.artworkLimit || 0)} artwork<br>${Number(plan.mediaStorageLimit || 0)} MB</td>
+        <td>${Number(plan.galleryLimit || 0)} galleries<br>${Number(plan.artworkLimit || 0)} artwork<br>${Number(plan.mediaLimit || 0) || "Unlimited"} media<br>${Number(plan.mediaStorageLimit || 0)} MB</td>
         <td>${plan.stripeProductId ? "Product set" : "No product"}<br>${plan.stripeTestMonthlyPriceId || plan.stripeMonthlyPriceId ? "Test monthly set" : "No test monthly"}<br>${plan.stripeLiveMonthlyPriceId ? "Live monthly set" : "No live monthly"}</td>
         <td>${escapeHtml(plan.displayOrder)}</td>
         <td class="admin-actions">
@@ -776,6 +777,12 @@
       ${field("currentPeriodStart", "Current Period Start", artist.currentPeriodStart)}
       ${field("currentPeriodEnd", "Current Period End", artist.currentPeriodEnd)}
       ${checkbox("cancelAtPeriodEnd", "Cancel at Period End", artist.cancelAtPeriodEnd)}
+      ${checkbox("ignoreLimits", "Ignore Plan Limits", artist.ignoreLimits)}
+      ${field("customGalleryLimit", "Custom Gallery Limit", artist.customGalleryLimit || 0, "number")}
+      ${field("customArtworkLimit", "Custom Artwork Limit", artist.customArtworkLimit || 0, "number")}
+      ${field("customMediaLimit", "Custom Media Limit", artist.customMediaLimit || 0, "number")}
+      ${field("customStorageLimit", "Custom Storage Limit MB", artist.customStorageLimit || 0, "number")}
+      ${textarea("limitOverrideNotes", "Limit Override Notes", artist.limitOverrideNotes)}
       ${checkbox("featured", "Featured", artist.featured)}
       ${textarea("shortDescription", "Short Description", artist.shortDescription)}
       ${textarea("bio", "Long Bio / Artist Statement", artist.bio)}
@@ -794,6 +801,8 @@
       const billing = billingForArtist(artist.id);
       const plan = billing.plan || planById(artist.planId);
       const usage = billing.usage || {};
+      const evaluation = billing.usageEvaluation || {};
+      const limitStatus = evaluation.status || "ok";
       const acceptedOrLogin = account?.lastLoginAt || account?.acceptedAt || invitation?.acceptedAt || "";
       return `
         <tr>
@@ -804,8 +813,8 @@
         <td>${badge(artist.status)}</td>
         <td>${yesNo(artist.featured)}</td>
         <td>${account ? badge(account.status || "active") : badge(invitation?.status || artist.invitationStatus || "none")}</td>
-        <td>${escapeHtml(plan?.name || "No plan")}<br>${badge(artist.billingStatus || "not_configured")}</td>
-        <td>${Number(usage.galleries || 0)} galleries<br>${Number(usage.artwork || 0)} artwork<br>${Number(usage.media || 0)} media<br>${Number(usage.storageMb || 0)} MB</td>
+        <td>${escapeHtml(plan?.name || "No plan")}<br>${badge(artist.billingStatus || "not_configured")}<br>${badge(limitStatus)}</td>
+        <td>${Number(usage.galleries || 0)} galleries (${Number(usage.publishedGalleries || 0)} published)<br>${Number(usage.artwork || 0)} artwork (${Number(usage.publishedArtwork || 0)} published)<br>${Number(usage.media || 0)} media<br>${Number(usage.storageMb || 0)} MB${evaluation.warnings?.length ? `<br><strong>${escapeHtml(evaluation.warnings[0])}</strong>` : ""}</td>
         <td>${escapeHtml(profileCompleteness(artist))}</td>
         <td>${escapeHtml(formatDate(acceptedOrLogin))}</td>
         <td>${artist.status === "published" ? `<a href="${publicArtistUrl(artist)}">${publicArtistUrl(artist)}</a>` : "Not public"}</td>

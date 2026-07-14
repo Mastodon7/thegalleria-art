@@ -84,6 +84,12 @@ Phase 14 adds public pricing at `/pricing/`, protected plan management at `/admi
 
 Phase 15 adds `/admin/billing/settings/`, Stripe readiness checks, plan Stripe price ID mapping fields, test/live Checkout session structure, Customer Portal session structure, and a signed webhook endpoint. Online billing remains disabled when Stripe keys or plan price IDs are missing. Live mode should only be used after test mode, Checkout, Customer Portal, and webhook handling have been verified in Stripe.
 
+## Storage limits and quotas
+
+Phase 16 connects artist plans to server-side quota checks. The admin artist editor can set custom gallery, artwork, media, and storage limits or ignore limits for legacy/comped/custom accounts. Carolyn Elaine remains protected with an ignore-limits override.
+
+Usage is calculated per artist for galleries, published galleries, artwork, published artwork, media records, and media storage. Storage counts processed media variant sizes when available, with legacy metadata as a fallback. Limit warnings appear near 80% usage, and new uploads/creates/publishes are blocked only when the next action would exceed a hard limit. Existing content is never deleted or unpublished automatically.
+
 ## Artist portal demo
 
 Phase 7 adds the first protected artist-facing demo portal at `/artist/login/`.
