@@ -30,7 +30,26 @@
   }
 
   function activeMedia() {
-    return state.media.filter((media) => media.status !== "archived");
+    return state.media.filter((media) => media.status === "ready" || (!media.status && media.publicPath));
+  }
+
+  function mediaVariant(item, preferred) {
+    return item?.variants?.[preferred] || item?.variants?.gallery || item?.variants?.large || item?.variants?.thumbnail || null;
+  }
+
+  function mediaPath(item, preferred = "gallery") {
+    return mediaVariant(item, preferred)?.path || item?.publicPath || "";
+  }
+
+  function mediaDimensions(item) {
+    const variant = mediaVariant(item, "large");
+    const width = item.originalWidth || item.width || variant?.width;
+    const height = item.originalHeight || item.height || variant?.height;
+    return width && height ? `${width}x${height}` : "";
+  }
+
+  function mediaOwnerName(item) {
+    return artistById(item.ownerArtistId)?.name || (item.ownerArtistId ? "Unknown artist" : "Admin / shared");
   }
 
   function publicArtistUrl(artist) {
@@ -124,20 +143,68 @@
   }
 
   async function uploadApi(path, formData) {
-    const response = await fetch(path, {
-      method: "POST",
-      credentials: "same-origin",
-      body: formData
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      const status = document.getElementById("media-upload-status");
+      const label = status?.querySelector("span");
+      const progress = status?.querySelector("progress");
+
+      if (status) {
+        status.hidden = false;
+      }
+      if (label) {
+        label.textContent = "Uploading";
+      }
+      if (progress) {
+        progress.removeAttribute("value");
+      }
+
+      request.open("POST", path);
+      request.withCredentials = true;
+
+      request.upload.addEventListener("progress", (event) => {
+        if (progress && event.lengthComputable) {
+          progress.value = Math.round((event.loaded / event.total) * 100);
+        }
+      });
+
+      request.upload.addEventListener("load", () => {
+        if (label) {
+          label.textContent = "Processing image...";
+        }
+        if (progress) {
+          progress.removeAttribute("value");
+        }
+      });
+
+      request.addEventListener("load", () => {
+        let payload;
+        try {
+          payload = JSON.parse(request.responseText || "{}");
+        } catch (error) {
+          reject(new Error("Upload response was not readable."));
+          return;
+        }
+
+        if (request.status === 401) {
+          showMessage("error", payload.message || "Unauthorized access. Please log in again.");
+          window.location.href = "/admin/login/";
+          reject(new Error("Unauthorized"));
+          return;
+        }
+
+        if (label) {
+          label.textContent = payload.ok ? "Ready" : "Failed";
+        }
+        if (progress) {
+          progress.value = 100;
+        }
+        resolve(payload);
+      });
+
+      request.addEventListener("error", () => reject(new Error("Upload failed.")));
+      request.send(formData);
     });
-    const payload = await response.json();
-
-    if (response.status === 401) {
-      showMessage("error", payload.message || "Unauthorized access. Please log in again.");
-      window.location.href = "/admin/login/";
-      throw new Error("Unauthorized");
-    }
-
-    return payload;
   }
 
   function applyContent(content) {
@@ -174,7 +241,7 @@
           <select data-media-select="${name}">
             <option value="">Select uploaded image</option>
             ${media.map((item) => `
-              <option value="${attr(item.publicPath)}"${item.publicPath === value ? " selected" : ""}>${escapeHtml(item.originalFilename)}</option>
+              <option value="${attr(mediaPath(item, "gallery"))}"${mediaPath(item, "gallery") === value ? " selected" : ""}>${escapeHtml(item.originalFilename)}</option>
             `).join("")}
           </select>
         </label>
@@ -248,6 +315,21 @@
     setText("artwork-count", state.artwork.length);
     setText("media-count", activeMedia().length);
     setText("published-count", state.artists.filter((artist) => artist.status === "published").length);
+  }
+
+  function renderMediaOwnerSelect() {
+    const selectElement = document.getElementById("media-owner-select");
+    if (!selectElement) {
+      return;
+    }
+
+    const selected = selectElement.value;
+    selectElement.innerHTML = `
+      <option value="">Admin / shared</option>
+      ${state.artists.map((artist) => `
+        <option value="${attr(artist.id)}"${artist.id === selected ? " selected" : ""}>${escapeHtml(artist.name)}</option>
+      `).join("")}
+    `;
   }
 
   function renderArtistForm(artist = {}) {
@@ -420,7 +502,7 @@
       return;
     }
 
-    const media = state.media.slice().sort((left, right) => String(right.uploadedAt || "").localeCompare(String(left.uploadedAt || "")));
+    const media = state.media.slice().sort((left, right) => String(right.createdAt || right.uploadedAt || "").localeCompare(String(left.createdAt || left.uploadedAt || "")));
     if (!media.length) {
       grid.innerHTML = '<p class="empty-state">No uploaded images yet.</p>';
       return;
@@ -428,15 +510,19 @@
 
     grid.innerHTML = media.map((item) => `
       <article class="admin-media-card ${item.status === "archived" ? "archived" : ""}">
-        <img src="${attr(item.publicPath)}" alt="${attr(item.originalFilename)}">
+        <img src="${attr(mediaPath(item, "thumbnail"))}" alt="${attr(item.originalFilename)}">
         <div>
           <h3>${escapeHtml(item.originalFilename)}</h3>
-          <p>${escapeHtml(item.publicPath)}</p>
-          <p>${escapeHtml(item.mimeType)} · ${formatBytes(item.size)}${item.width && item.height ? ` · ${item.width}x${item.height}` : ""}</p>
-          <p>Uploaded ${formatDate(item.uploadedAt)} · ${badge(item.status)}</p>
+          <p>${escapeHtml(mediaPath(item, "gallery") || item.publicPath)}</p>
+          <p>${escapeHtml(item.mimeType)} - ${formatBytes(item.originalSize || item.size)}${mediaDimensions(item) ? ` - ${mediaDimensions(item)}` : ""}</p>
+          <p>Variants: ${["thumbnail", "gallery", "large"].filter((key) => item.variants?.[key]).join(", ") || "legacy"}</p>
+          <p>Owner: ${escapeHtml(mediaOwnerName(item))}</p>
+          <p>Uploaded ${formatDate(item.createdAt || item.uploadedAt)} - ${badge(item.status || "ready")}</p>
+          ${item.errorMessage ? `<p>${escapeHtml(item.errorMessage)}</p>` : ""}
         </div>
         <div class="admin-actions">
-          <button type="button" data-copy-path="${attr(item.publicPath)}">Copy Path</button>
+          <button type="button" data-copy-path="${attr(mediaPath(item, "gallery"))}"${activeMedia().includes(item) ? "" : " disabled"}>Copy Gallery Path</button>
+          <button type="button" data-copy-path="${attr(mediaPath(item, "large"))}"${activeMedia().includes(item) ? "" : " disabled"}>Copy Large Path</button>
           <button type="button" data-archive-media="${attr(item.id)}"${item.status === "archived" ? " disabled" : ""}>Archive</button>
         </div>
       </article>
@@ -445,6 +531,7 @@
 
   function renderAll() {
     renderDashboard();
+    renderMediaOwnerSelect();
     renderArtists();
     renderGalleries();
     renderArtwork();

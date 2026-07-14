@@ -35,14 +35,24 @@
 
       <section class="admin-panel" aria-labelledby="media-upload-title">
         <h2 id="media-upload-title">Upload Image</h2>
-        <p class="admin-muted">Upload JPG, PNG, or WebP images up to 8 MB. Uploaded paths can be assigned to artist, gallery, and artwork records.</p>
+        <p class="admin-muted">Upload JPG, PNG, or WebP images up to 20 MB. Images are processed into thumbnail, gallery, and large variants before they can be assigned publicly.</p>
         <form class="admin-upload-form" id="media-upload-form">
           <label>
             <span>Image File</span>
             <input name="image" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required>
           </label>
+          <label>
+            <span>Owner Artist</span>
+            <select name="ownerArtistId" id="media-owner-select">
+              <option value="">Admin / shared</option>
+            </select>
+          </label>
           <button class="admin-primary-action" type="submit">Upload Image</button>
         </form>
+        <div class="upload-status" id="media-upload-status" hidden>
+          <span>Uploading</span>
+          <progress max="100" value="0"></progress>
+        </div>
       </section>
 
       <section class="admin-panel" aria-labelledby="media-library-title">

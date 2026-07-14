@@ -44,6 +44,8 @@ Phase 6 adds protected media uploads at `/admin/media/`. Uploaded JPG, PNG, and 
 
 For Coolify, the same persistent `/data` mount used for `DATA_DIR` should remain in place. That keeps both `content.json` and uploaded media files outside the transient build output.
 
+Phase 8 processes new uploads with Sharp. Original uploads are written only to `DATA_DIR/tmp-uploads` during processing, then removed. Ready media records contain WebP thumbnail, gallery, and large variants; failed or processing media should not be selectable for public fields.
+
 ## Artist portal demo
 
 Phase 7 adds the first protected artist-facing demo portal at `/artist/login/`.

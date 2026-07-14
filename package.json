@@ -1,0 +1,13 @@
+{
+  "name": "thegalleria-art",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The Galleria.Art public gallery and private admin/artist portal.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}

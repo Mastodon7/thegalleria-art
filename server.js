@@ -3,14 +3,18 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { URLSearchParams } = require("url");
+const sharp = require("sharp");
 
 const publicDir = path.join(__dirname, "public");
 const seedPath = path.join(__dirname, "seed-content.json");
 const dataDir = process.env.DATA_DIR || path.join(__dirname, "content-data");
 const dataFile = process.env.CONTENT_DATA_FILE || path.join(dataDir, "content.json");
 const mediaDir = process.env.MEDIA_DIR || path.join(dataDir, "media");
+const tempUploadDir = path.join(dataDir, "tmp-uploads");
 const uploadBasePath = "/uploads";
-const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 8 * 1024 * 1024);
+const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 20 * 1024 * 1024);
+const maxSourcePixels = Number(process.env.MAX_SOURCE_PIXELS || 100 * 1000 * 1000);
+const maxSourceDimension = Number(process.env.MAX_SOURCE_DIMENSION || 16000);
 const port = Number(process.env.PORT || 80);
 const adminEmail = process.env.ADMIN_EMAIL || "mc@25mprinting.com";
 const passwordSalt = process.env.ADMIN_PASSWORD_SALT || "galleria-admin-bootstrap-v1";
@@ -27,6 +31,11 @@ const allowedImageTypes = new Map([
   ["image/png", ".png"],
   ["image/webp", ".webp"]
 ]);
+const mediaVariants = [
+  { key: "thumbnail", width: 480, quality: 76 },
+  { key: "gallery", width: 1200, quality: 82 },
+  { key: "large", width: 2400, quality: 88 }
+];
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -216,6 +225,7 @@ function mergeMissingSeedRecords(content, seed) {
 function ensureContentStore() {
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(mediaDir, { recursive: true });
+  fs.mkdirSync(tempUploadDir, { recursive: true });
   const seed = normalizeContent(readSeedContent());
 
   if (!fs.existsSync(dataFile)) {
@@ -242,6 +252,70 @@ function sortByDisplayOrder(left, right) {
   return Number(left.displayOrder || 0) - Number(right.displayOrder || 0);
 }
 
+function mediaVariant(media, preferred = "gallery") {
+  if (!media?.variants) {
+    return null;
+  }
+
+  return media.variants[preferred] ||
+    media.variants.gallery ||
+    media.variants.large ||
+    media.variants.thumbnail ||
+    null;
+}
+
+function mediaPath(media, preferred = "gallery") {
+  return mediaVariant(media, preferred)?.path || media?.publicPath || "";
+}
+
+function mediaContainsPath(media, imagePath) {
+  if (!media || !imagePath) {
+    return false;
+  }
+
+  return media.publicPath === imagePath ||
+    Object.values(media.variants || {}).some((variant) => variant?.path === imagePath);
+}
+
+function findMediaByPath(content, imagePath) {
+  return content.media.find((media) => mediaContainsPath(media, imagePath));
+}
+
+function resolveImagePath(content, imagePath, preferred = "gallery") {
+  const media = findMediaByPath(content, imagePath);
+  if (media?.status === "ready") {
+    return mediaPath(media, preferred) || imagePath;
+  }
+
+  return imagePath;
+}
+
+function readyMediaForSelect(media) {
+  return media.status === "ready" || (!media.status && media.publicPath);
+}
+
+function optimizeArtistForPublic(content, artist) {
+  return {
+    ...artist,
+    heroImage: resolveImagePath(content, artist.heroImage, "gallery")
+  };
+}
+
+function optimizeGalleryForPublic(content, gallery) {
+  return {
+    ...gallery,
+    coverImage: resolveImagePath(content, gallery.coverImage, "gallery")
+  };
+}
+
+function optimizeArtworkForPublic(content, artwork) {
+  return {
+    ...artwork,
+    image: resolveImagePath(content, artwork.image, "gallery"),
+    largeImage: resolveImagePath(content, artwork.image, "large")
+  };
+}
+
 function buildPublicData(content) {
   const artists = content.artists
     .filter((artist) => artist.status === "published")
@@ -250,13 +324,14 @@ function buildPublicData(content) {
         .filter((gallery) => gallery.artistId === artist.id && gallery.status === "published")
         .sort(sortByDisplayOrder)
         .map((gallery) => ({
-          ...gallery,
+          ...optimizeGalleryForPublic(content, gallery),
           artworks: content.artwork
             .filter((artwork) => artwork.galleryId === gallery.id && artwork.status === "published")
             .sort(sortByDisplayOrder)
+            .map((artwork) => optimizeArtworkForPublic(content, artwork))
         }));
 
-      return { ...artist, galleries };
+      return { ...optimizeArtistForPublic(content, artist), galleries };
     })
     .filter((artist) => artist.galleries.length);
 
@@ -268,13 +343,14 @@ function publicContentWithArtist(content, artist) {
     .filter((gallery) => gallery.artistId === artist.id && gallery.status === "published")
     .sort(sortByDisplayOrder)
     .map((gallery) => ({
-      ...gallery,
+      ...optimizeGalleryForPublic(content, gallery),
       artworks: content.artwork
         .filter((artwork) => artwork.galleryId === gallery.id && artwork.status === "published")
         .sort(sortByDisplayOrder)
+        .map((artwork) => optimizeArtworkForPublic(content, artwork))
     }));
 
-  return { ...artist, galleries };
+  return { ...optimizeArtistForPublic(content, artist), galleries };
 }
 
 function publicPathForArtist(artist) {
@@ -346,8 +422,8 @@ function renderPublicArtistPage(artist) {
         <div class="dynamic-artwork-grid">
           ${artworks.map((artwork, index) => `
             <article class="dynamic-artwork-card">
-              <button class="dynamic-lightbox-trigger" type="button" data-index="${index}" data-src="${escapeHtml(artwork.image)}" data-title="${escapeHtml(artwork.title)}" data-meta="${escapeHtml([artwork.year, artwork.location, artwork.medium].filter(Boolean).join(" - "))}" aria-label="View ${escapeHtml(artwork.title)}">
-                <img src="${escapeHtml(artwork.image)}" alt="${escapeHtml(artwork.alt || artwork.title)}">
+              <button class="dynamic-lightbox-trigger" type="button" data-index="${index}" data-src="${escapeHtml(artwork.largeImage || artwork.image)}" data-title="${escapeHtml(artwork.title)}" data-meta="${escapeHtml([artwork.year, artwork.location, artwork.medium].filter(Boolean).join(" - "))}" aria-label="View ${escapeHtml(artwork.title)}">
+                <img src="${escapeHtml(artwork.image)}" alt="${escapeHtml(artwork.alt || artwork.title)}" loading="lazy">
               </button>
               <div>
                 <p>${escapeHtml(artwork.galleryTitle || "")}</p>
@@ -653,6 +729,166 @@ function sanitizeFilename(filename) {
   return safeBase;
 }
 
+function detectImageMime(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+
+  if (buffer.length >= 12 &&
+    buffer[0] === 0x89 &&
+    buffer.toString("ascii", 1, 4) === "PNG") {
+    return "image/png";
+  }
+
+  if (buffer.length >= 12 &&
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+
+  return "";
+}
+
+function uploadExtension(filename) {
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  return extension === ".jpeg" ? ".jpg" : extension;
+}
+
+function updateMediaRecord(content, id, patch) {
+  const index = content.media.findIndex((media) => media.id === id);
+  if (index >= 0) {
+    content.media[index] = { ...content.media[index], ...patch, updatedAt: nowIso() };
+    return content.media[index];
+  }
+
+  return null;
+}
+
+async function processMediaUpload(upload, options = {}) {
+  const now = nowIso();
+  const mediaId = generateId("media");
+  const detectedMimeType = detectImageMime(upload.buffer);
+  const declaredExtension = uploadExtension(upload.originalFilename);
+  const safeBase = sanitizeFilename(upload.originalFilename);
+  const uniqueSuffix = mediaId.replace("media-", "").slice(0, 12);
+  const storedBaseFilename = `${safeBase}-${uniqueSuffix}`;
+  const tempFilename = `${storedBaseFilename}${declaredExtension || ".upload"}`;
+  const tempPath = path.join(tempUploadDir, tempFilename);
+  const content = loadContent();
+  const record = {
+    id: mediaId,
+    originalFilename: upload.originalFilename,
+    storedBaseFilename,
+    storedFilename: "",
+    publicPath: "",
+    mimeType: detectedMimeType || upload.mimeType,
+    originalSize: upload.buffer.length,
+    originalWidth: null,
+    originalHeight: null,
+    variants: {},
+    uploadedBy: options.uploadedBy || "admin",
+    ownerArtistId: options.ownerArtistId || "",
+    status: "processing",
+    errorMessage: "",
+    createdAt: now,
+    uploadedAt: now,
+    updatedAt: now
+  };
+
+  content.media.push(record);
+  saveContent(content, "media-processing-start");
+
+  try {
+    if (!allowedImageTypes.has(upload.mimeType) || !allowedImageTypes.has(detectedMimeType)) {
+      throw new Error("Unsupported file type. Upload JPG, PNG, or WebP images only.");
+    }
+
+    if (uploadExtension(upload.originalFilename) !== allowedImageTypes.get(detectedMimeType)) {
+      throw new Error("File extension does not match the uploaded image type.");
+    }
+
+    if (upload.buffer.length > maxUploadBytes) {
+      throw new Error("Image file is too large. Upload images up to 20 MB.");
+    }
+
+    fs.mkdirSync(tempUploadDir, { recursive: true });
+    fs.writeFileSync(tempPath, upload.buffer);
+
+    const image = sharp(tempPath, { limitInputPixels: maxSourcePixels }).rotate();
+    const metadata = await image.metadata();
+    const originalWidth = Number(metadata.width || 0);
+    const originalHeight = Number(metadata.height || 0);
+
+    if (!originalWidth || !originalHeight) {
+      throw new Error("Image dimensions could not be read.");
+    }
+
+    if (originalWidth > maxSourceDimension || originalHeight > maxSourceDimension || originalWidth * originalHeight > maxSourcePixels) {
+      throw new Error("Image dimensions are too large for processing.");
+    }
+
+    const variants = {};
+
+    for (const variant of mediaVariants) {
+      const outputFilename = `${storedBaseFilename}-${variant.key}.webp`;
+      const outputPath = path.join(mediaDir, outputFilename);
+
+      if (!outputPath.startsWith(`${mediaDir}${path.sep}`)) {
+        throw new Error("Invalid media output path.");
+      }
+
+      const output = await sharp(tempPath, { limitInputPixels: maxSourcePixels })
+        .rotate()
+        .resize({ width: variant.width, withoutEnlargement: true })
+        .webp({ quality: variant.quality })
+        .toBuffer({ resolveWithObject: true });
+
+      fs.writeFileSync(outputPath, output.data);
+      variants[variant.key] = {
+        path: `${uploadBasePath}/${outputFilename}`,
+        width: output.info.width,
+        height: output.info.height,
+        size: output.info.size,
+        mimeType: "image/webp"
+      };
+    }
+
+    const finalContent = loadContent();
+    const readyRecord = updateMediaRecord(finalContent, mediaId, {
+      storedFilename: path.basename(variants.large?.path || variants.gallery?.path || variants.thumbnail?.path || ""),
+      publicPath: variants.large?.path || variants.gallery?.path || variants.thumbnail?.path || "",
+      mimeType: "image/webp",
+      originalWidth,
+      originalHeight,
+      width: variants.large?.width || variants.gallery?.width || variants.thumbnail?.width || originalWidth,
+      height: variants.large?.height || variants.gallery?.height || variants.thumbnail?.height || originalHeight,
+      size: variants.large?.size || variants.gallery?.size || variants.thumbnail?.size || upload.buffer.length,
+      variants,
+      status: "ready",
+      errorMessage: ""
+    });
+    saveContent(finalContent, "media-processing-ready");
+    return { ok: true, media: readyRecord, content: finalContent };
+  } catch (error) {
+    const failedContent = loadContent();
+    const failedRecord = updateMediaRecord(failedContent, mediaId, {
+      status: "failed",
+      errorMessage: error.message || "Image processing failed."
+    });
+    saveContent(failedContent, "media-processing-failed");
+    return {
+      ok: false,
+      media: failedRecord,
+      content: failedContent,
+      message: error.message || "Image processing failed."
+    };
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+  }
+}
+
 function parseMultipartUpload(request, buffer) {
   const contentType = request.headers["content-type"] || "";
   const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
@@ -664,9 +900,11 @@ function parseMultipartUpload(request, buffer) {
   const boundary = `--${boundaryMatch[1] || boundaryMatch[2]}`;
   const body = buffer.toString("binary");
   const parts = body.split(boundary);
+  const fields = {};
+  let upload = null;
 
   for (const part of parts) {
-    if (!part.includes("Content-Disposition") || !part.includes('name="image"')) {
+    if (!part.includes("Content-Disposition")) {
       continue;
     }
 
@@ -679,17 +917,32 @@ function parseMultipartUpload(request, buffer) {
     let content = part.slice(headerEnd + 4);
     content = content.replace(/\r\n--$/, "").replace(/\r\n$/, "");
 
+    const fieldName = headers.match(/name="([^"]*)"/i)?.[1] || "";
+    if (!fieldName) {
+      continue;
+    }
+
+    if (fieldName !== "image") {
+      fields[fieldName] = Buffer.from(content, "binary").toString("utf8").trim();
+      continue;
+    }
+
     const filename = headers.match(/filename="([^"]*)"/i)?.[1] || "upload";
     const mimeType = headers.match(/Content-Type:\s*([^\r\n]+)/i)?.[1]?.trim().toLowerCase() || "";
 
-    return {
+    upload = {
       originalFilename: path.basename(filename),
       mimeType,
-      buffer: Buffer.from(content, "binary")
+      buffer: Buffer.from(content, "binary"),
+      fields
     };
   }
 
-  return null;
+  if (upload) {
+    upload.fields = fields;
+  }
+
+  return upload;
 }
 
 function readPngSize(buffer) {
@@ -804,6 +1057,35 @@ function isValidImageReference(value) {
   return /^\/[^\s]+/.test(value) || /^https?:\/\/[^\s]+$/i.test(value);
 }
 
+function isReadyUploadReference(content, value) {
+  if (!value || !value.startsWith(`${uploadBasePath}/`)) {
+    return true;
+  }
+
+  const media = findMediaByPath(content, value);
+  return Boolean(media && media.status === "ready");
+}
+
+function isArtistAllowedImageReference(context, value) {
+  if (!value || !value.startsWith(`${uploadBasePath}/`)) {
+    return true;
+  }
+
+  const media = findMediaByPath(context.content, value);
+  if (!media || media.status !== "ready") {
+    return false;
+  }
+
+  if (media.ownerArtistId === context.artist.id) {
+    return true;
+  }
+
+  const galleries = context.content.galleries.filter((gallery) => gallery.artistId === context.artist.id);
+  const artwork = context.content.artwork.filter((item) => item.artistId === context.artist.id);
+  return artistScopedMedia(context.content, context.artist, galleries, artwork)
+    .some((item) => mediaContainsPath(item, value));
+}
+
 function hasValidStatus(value) {
   return validStatuses.has(value);
 }
@@ -839,6 +1121,7 @@ function validateArtist(input, content, existing) {
   const status = cleanString(input.status || "draft");
   const invitationStatus = cleanString(input.invitationStatus || "none");
   const contactEmail = cleanString(input.contactEmail);
+  const heroImage = cleanString(input.heroImage);
 
   if (!name) {
     errors.push("Artist name is required.");
@@ -864,6 +1147,10 @@ function validateArtist(input, content, existing) {
     errors.push("Contact email is not valid.");
   }
 
+  if (heroImage && (!isValidImageReference(heroImage) || !isReadyUploadReference(content, heroImage))) {
+    errors.push("Hero image must be a ready uploaded image, existing image path, or image URL.");
+  }
+
   return {
     errors,
     record: {
@@ -877,7 +1164,7 @@ function validateArtist(input, content, existing) {
       country: cleanString(input.country),
       medium: cleanString(input.medium),
       category: cleanString(input.category),
-      heroImage: cleanString(input.heroImage),
+      heroImage,
       shortDescription: cleanString(input.shortDescription),
       bio: cleanString(input.bio),
       contactEmail,
@@ -900,6 +1187,7 @@ function validateGallery(input, content, existing) {
   const artistId = cleanString(input.artistId);
   const status = cleanString(input.status || "draft");
   const artist = content.artists.find((item) => item.id === artistId);
+  const coverImage = cleanString(input.coverImage);
 
   if (!title) {
     errors.push("Gallery title is required.");
@@ -921,6 +1209,10 @@ function validateGallery(input, content, existing) {
     errors.push("Gallery status must be published, draft, or archived.");
   }
 
+  if (coverImage && (!isValidImageReference(coverImage) || !isReadyUploadReference(content, coverImage))) {
+    errors.push("Cover image must be a ready uploaded image, existing image path, or image URL.");
+  }
+
   return {
     errors,
     record: {
@@ -928,7 +1220,7 @@ function validateGallery(input, content, existing) {
       artistId,
       title,
       slug,
-      coverImage: cleanString(input.coverImage),
+      coverImage,
       description: cleanString(input.description),
       status,
       featured: parseBoolean(input.featured),
@@ -970,8 +1262,12 @@ function validateArtwork(input, content, existing) {
     errors.push("Artwork status must be published, draft, or archived.");
   }
 
-  if (status === "published" && !isValidImageReference(image)) {
+  if (status === "published" && (!isValidImageReference(image) || !isReadyUploadReference(content, image))) {
     errors.push("Published artwork requires an existing image path or image URL.");
+  }
+
+  if (image && !isReadyUploadReference(content, image)) {
+    errors.push("Artwork image must be a ready uploaded image, existing image path, or image URL.");
   }
 
   return {
@@ -1057,13 +1353,17 @@ function archiveRecord(resource, id) {
 }
 
 function isMediaInUse(content, publicPath) {
-  return content.artists.some((artist) => artist.heroImage === publicPath || artist.profileImage === publicPath) ||
-    content.galleries.some((gallery) => gallery.coverImage === publicPath) ||
-    content.artwork.some((artwork) => artwork.image === publicPath);
+  const media = findMediaByPath(content, publicPath);
+  const matches = (imagePath) => imagePath === publicPath || mediaContainsPath(media, imagePath);
+
+  return content.artists.some((artist) => matches(artist.heroImage) || matches(artist.profileImage)) ||
+    content.galleries.some((gallery) => matches(gallery.coverImage)) ||
+    content.artwork.some((artwork) => matches(artwork.image));
 }
 
-function handleMediaUpload(request, response) {
-  collectBuffer(request, response, (body) => {
+function handleMediaUpload(request, response, options = {}) {
+  collectBuffer(request, response, async (body) => {
+    const contentForResponse = options.contentForResponse || ((content) => publicSafeContent(content));
     const upload = parseMultipartUpload(request, body);
 
     if (!upload || !upload.buffer.length) {
@@ -1071,59 +1371,42 @@ function handleMediaUpload(request, response) {
       return;
     }
 
-    if (!allowedImageTypes.has(upload.mimeType)) {
+    if (!allowedImageTypes.has(upload.mimeType) || !allowedImageTypes.has(detectImageMime(upload.buffer))) {
       sendJson(response, 422, { ok: false, message: "Unsupported file type. Upload JPG, PNG, or WebP images only." });
       return;
     }
 
     if (upload.buffer.length > maxUploadBytes) {
-      sendJson(response, 413, { ok: false, message: "Image file is too large." });
+      sendJson(response, 413, { ok: false, message: "Image file is too large. Upload images up to 20 MB." });
       return;
     }
 
-    const content = loadContent();
-    fs.mkdirSync(mediaDir, { recursive: true });
-
-    const mediaId = generateId("media");
-    const extension = allowedImageTypes.get(upload.mimeType);
-    const safeBase = sanitizeFilename(upload.originalFilename);
-    const storedFilename = `${safeBase}-${mediaId.replace("media-", "").slice(0, 12)}${extension}`;
-    const absolutePath = path.join(mediaDir, storedFilename);
-
-    if (!absolutePath.startsWith(`${mediaDir}${path.sep}`)) {
-      sendJson(response, 400, { ok: false, message: "Invalid upload path." });
+    const ownerArtistId = cleanString(options.ownerArtistId || upload.fields?.ownerArtistId);
+    if (ownerArtistId && !loadContent().artists.some((artist) => artist.id === ownerArtistId)) {
+      sendJson(response, 422, { ok: false, message: "Selected media owner was not found." });
       return;
     }
 
-    if (fs.existsSync(absolutePath)) {
-      sendJson(response, 409, { ok: false, message: "A file with that generated name already exists. Please try again." });
+    const result = await processMediaUpload(upload, {
+      uploadedBy: options.uploadedBy || "admin",
+      ownerArtistId
+    });
+
+    if (!result.ok) {
+      sendJson(response, 422, {
+        ok: false,
+        message: result.message,
+        media: result.media,
+        content: contentForResponse(result.content)
+      });
       return;
     }
 
-    const size = readImageSize(upload.buffer, upload.mimeType);
-    fs.writeFileSync(absolutePath, upload.buffer);
-
-    const record = {
-      id: mediaId,
-      originalFilename: upload.originalFilename,
-      storedFilename,
-      publicPath: `${uploadBasePath}/${storedFilename}`,
-      mimeType: upload.mimeType,
-      size: upload.buffer.length,
-      width: size.width || null,
-      height: size.height || null,
-      uploadedAt: nowIso(),
-      updatedAt: nowIso(),
-      status: "published"
-    };
-
-    content.media.push(record);
-    saveContent(content, "media-upload");
     sendJson(response, 200, {
       ok: true,
-      message: "Image uploaded successfully.",
-      media: record,
-      content: publicSafeContent(content)
+      message: "Image uploaded and processed successfully.",
+      media: result.media,
+      content: contentForResponse(result.content)
     });
   });
 }
@@ -1204,10 +1487,13 @@ function artistScopedMedia(content, artist, galleries, artwork) {
     ...galleries.map((gallery) => gallery.coverImage),
     ...artwork.map((item) => item.image)
   ].filter(Boolean));
-  const mediaRecords = content.media.filter((media) => paths.has(media.publicPath));
+  const mediaRecords = content.media.filter((media) =>
+    media.ownerArtistId === artist.id ||
+    [...paths].some((imagePath) => mediaContainsPath(media, imagePath))
+  );
 
   paths.forEach((publicPath) => {
-    if (!mediaRecords.some((media) => media.publicPath === publicPath)) {
+    if (!mediaRecords.some((media) => mediaContainsPath(media, publicPath))) {
       mediaRecords.push({
         id: `referenced-${crypto.createHash("sha1").update(publicPath).digest("hex").slice(0, 12)}`,
         originalFilename: path.basename(publicPath),
@@ -1303,8 +1589,8 @@ function updateArtistProfile(context, input) {
     errors.push("Contact email is not valid.");
   }
 
-  if (heroImage && !isValidImageReference(heroImage)) {
-    errors.push("Hero image must be an existing image path or image URL.");
+  if (heroImage && (!isValidImageReference(heroImage) || !isArtistAllowedImageReference(context, heroImage))) {
+    errors.push("Hero image must be a ready uploaded image, existing image path, or image URL.");
   }
 
   if (errors.length) {
@@ -1346,8 +1632,8 @@ function updateArtistGallery(context, id, input) {
   }
 
   const coverImage = cleanString(input.coverImage);
-  if (coverImage && !isValidImageReference(coverImage)) {
-    errors.push("Cover image must be an existing image path or image URL.");
+  if (coverImage && (!isValidImageReference(coverImage) || !isArtistAllowedImageReference(context, coverImage))) {
+    errors.push("Cover image must be a ready uploaded image, existing image path, or image URL.");
   }
 
   if (errors.length) {
@@ -1388,8 +1674,8 @@ function updateArtistArtwork(context, id, input) {
   }
 
   const image = cleanString(input.image);
-  if (image && !isValidImageReference(image)) {
-    errors.push("Artwork image must be an existing image path or image URL.");
+  if (image && (!isValidImageReference(image) || !isArtistAllowedImageReference(context, image))) {
+    errors.push("Artwork image must be a ready uploaded image, existing image path, or image URL.");
   }
 
   if (errors.length) {
@@ -1422,6 +1708,15 @@ function handleArtistApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/artist/api/content") {
     sendArtistPortalContent(response, context);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/artist/api/media/upload") {
+    handleMediaUpload(request, response, {
+      uploadedBy: "artist",
+      ownerArtistId: context.artist.id,
+      contentForResponse: (content) => buildArtistPortalContent({ ...context, content })
+    });
     return;
   }
 
@@ -1489,7 +1784,7 @@ function handleAdminApi(request, response, pathname) {
   }
 
   if (request.method === "POST" && pathname === "/admin/api/media/upload") {
-    handleMediaUpload(request, response);
+    handleMediaUpload(request, response, { uploadedBy: "admin" });
     return;
   }
 

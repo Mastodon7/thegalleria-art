@@ -33,8 +33,23 @@
         </div>
       </div>
       <section class="admin-panel">
-        <h2>Referenced Images</h2>
-        <p class="admin-muted">Artist uploads are currently owner-managed until media records receive owner scoping. This page shows images attached to your profile, galleries, and artwork.</p>
+        <h2>Upload Image</h2>
+        <p class="admin-muted">Upload JPG, PNG, or WebP images up to 20 MB. Images become selectable after processing is complete.</p>
+        <form class="admin-upload-form" id="artist-media-upload-form">
+          <label>
+            <span>Image File</span>
+            <input name="image" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required>
+          </label>
+          <button class="admin-primary-action" type="submit">Upload Image</button>
+        </form>
+        <div class="upload-status" id="artist-media-upload-status" hidden>
+          <span>Uploading</span>
+          <progress max="100" value="0"></progress>
+        </div>
+      </section>
+      <section class="admin-panel">
+        <h2>Your Images</h2>
+        <p class="admin-muted">This library shows images uploaded by you plus images already attached to your profile, galleries, and artwork.</p>
         <div class="admin-media-grid" id="artist-media-grid"></div>
       </section>
     </main>

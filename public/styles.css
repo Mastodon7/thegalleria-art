@@ -946,7 +946,7 @@ a {
 
 .admin-upload-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 16px;
   align-items: end;
   margin-top: 24px;
@@ -963,7 +963,8 @@ a {
   text-transform: uppercase;
 }
 
-.admin-upload-form input {
+.admin-upload-form input,
+.admin-upload-form select {
   width: 100%;
   min-height: 48px;
   border: 1px solid rgba(185, 151, 77, .28);
@@ -971,6 +972,25 @@ a {
   color: #f8f1e6;
   padding: 11px 14px;
   font: 400 .95rem/1.4 Arial, sans-serif;
+}
+
+.upload-status {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  color: #d7ccb9;
+}
+
+.upload-status span {
+  color: #b9974d;
+  font-size: .72rem;
+  text-transform: uppercase;
+}
+
+.upload-status progress {
+  width: 100%;
+  height: 12px;
+  accent-color: #b9974d;
 }
 
 .admin-image-field {
