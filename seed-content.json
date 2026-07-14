@@ -345,6 +345,11 @@
   ],
   "media": [],
   "inquiries": [],
+  "notifications": [],
+  "emailLog": [],
+  "passwordResetTokens": [],
+  "adminAccounts": [],
+  "auditLog": [],
   "statusHistory": [],
   "invitations": [
     {

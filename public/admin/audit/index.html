@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Review Queue | The Galleria.Art Admin</title>
+  <title>Audit Log | The Galleria.Art Admin</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="admin-page">
@@ -19,8 +19,8 @@
         <a href="/admin/media/">Media</a>
         <a href="/admin/inquiries/">Inquiries</a>
         <a href="/admin/invitations/">Invitations</a>
-        <a aria-current="page" href="/admin/review/">Review</a>
-        <a href="/admin/audit/">Audit</a>
+        <a href="/admin/review/">Review</a>
+        <a aria-current="page" href="/admin/audit/">Audit</a>
         <a href="/admin/settings/">Settings</a>
       </nav>
       <form action="/admin/logout" method="post">
@@ -28,38 +28,41 @@
       </form>
     </header>
 
-    <main class="admin-dashboard" aria-labelledby="review-title">
+    <main class="admin-dashboard" aria-labelledby="audit-title">
       <div class="admin-dashboard-heading">
         <div>
-          <p class="section-kicker">Publishing Workflow</p>
-          <h1 id="review-title">Review Queue</h1>
+          <p class="section-kicker">Operational Visibility</p>
+          <h1 id="audit-title">Audit Log</h1>
           <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
         </div>
       </div>
 
-      <section class="admin-panel" aria-labelledby="review-list-title">
-        <h2 id="review-list-title">Review Items</h2>
+      <section class="admin-panel" aria-labelledby="audit-list-title">
+        <h2 id="audit-list-title">Recent Events</h2>
+        <div class="inquiry-filter-grid">
+          <label>
+            <span>Action</span>
+            <input id="audit-action-filter" placeholder="review.published">
+          </label>
+          <label>
+            <span>Target Type</span>
+            <input id="audit-target-filter" placeholder="artist, inquiry, media">
+          </label>
+        </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
               <tr>
-                <th>Type</th>
-                <th>Artist</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Submitted</th>
-                <th>Preview</th>
+                <th>Date</th>
+                <th>Actor</th>
                 <th>Action</th>
+                <th>Target</th>
+                <th>Summary</th>
               </tr>
             </thead>
-            <tbody id="review-table"></tbody>
+            <tbody id="audit-table"></tbody>
           </table>
         </div>
-      </section>
-
-      <section class="admin-panel" aria-labelledby="review-detail-title">
-        <h2 id="review-detail-title">Review Detail</h2>
-        <div id="review-detail"></div>
       </section>
     </main>
   </div>

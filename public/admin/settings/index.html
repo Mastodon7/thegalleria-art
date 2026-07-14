@@ -20,6 +20,7 @@
         <a href="/admin/inquiries/">Inquiries</a>
         <a href="/admin/invitations/">Invitations</a>
         <a href="/admin/review/">Review</a>
+        <a href="/admin/audit/">Audit</a>
         <a aria-current="page" href="/admin/settings/">Settings</a>
       </nav>
       <form action="/admin/logout" method="post">
@@ -44,18 +45,18 @@
         </article>
         <article>
           <p>Public Contact Email</p>
-          <h2>hello@thegalleria.art</h2>
-          <span>Placeholder for future public inquiry routing.</span>
+          <h2 id="settings-public-contact-email">-</h2>
+          <span>Used for public-facing platform communication.</span>
+        </article>
+        <article>
+          <p>Email Provider</p>
+          <h2 id="settings-email-configured">-</h2>
+          <span id="settings-email-mode">Checking email mode...</span>
         </article>
         <article>
           <p>Invitation Settings</p>
           <h2>Invitation-Based</h2>
-          <span>Placeholder for future artist invitation controls.</span>
-        </article>
-        <article>
-          <p>Admin Password Change</p>
-          <h2>Planned</h2>
-          <span>Password replacement will be added when persistent account settings are introduced.</span>
+          <span>Invitations can send email when a provider is configured, or log copyable content otherwise.</span>
         </article>
         <article>
           <p>Future Billing Settings</p>
@@ -63,7 +64,23 @@
           <span>Billing is intentionally not included in this phase.</span>
         </article>
       </section>
+
+      <section class="admin-panel">
+        <h2>Exports</h2>
+        <div class="admin-actions">
+          <a href="/admin/api/exports/public.json">Export Public Content</a>
+          <a href="/admin/api/exports/inquiries.json">Export Inquiries</a>
+          <a href="/admin/api/exports/operational.json">Export Operational Backup</a>
+        </div>
+        <p class="admin-muted">Operational exports are admin-only and redact password hashes, salts, reset tokens, and invitation tokens.</p>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Email Log</h2>
+        <div class="inquiry-card-list" id="settings-email-log"></div>
+      </section>
     </main>
   </div>
+  <script src="/admin/admin.js"></script>
 </body>
 </html>

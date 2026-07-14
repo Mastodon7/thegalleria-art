@@ -16,7 +16,13 @@ const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 20 * 1024 * 1024);
 const maxSourcePixels = Number(process.env.MAX_SOURCE_PIXELS || 100 * 1000 * 1000);
 const maxSourceDimension = Number(process.env.MAX_SOURCE_DIMENSION || 16000);
 const port = Number(process.env.PORT || 80);
+const publicSiteUrl = (process.env.PUBLIC_SITE_URL || "https://thegalleria.art").replace(/\/+$/, "");
 const adminEmail = process.env.ADMIN_EMAIL || "mc@25mprinting.com";
+const publicContactEmail = process.env.PUBLIC_CONTACT_EMAIL || adminEmail;
+const emailFrom = process.env.EMAIL_FROM || "";
+const resendApiKey = process.env.RESEND_API_KEY || "";
+const analyticsProvider = process.env.ANALYTICS_PROVIDER || "";
+const analyticsId = process.env.ANALYTICS_ID || process.env.PLAUSIBLE_DOMAIN || "";
 const passwordSalt = process.env.ADMIN_PASSWORD_SALT || "galleria-admin-bootstrap-v1";
 const passwordHash = process.env.ADMIN_PASSWORD_HASH ||
   "61a567bd15cf8240b460bb5199b408e73bf6fea3f93d529075a56be811e0b3d9eeb280e43bf340411d87355f2fc85a0dc23765e5644062cdcc875f738ea53ec2";
@@ -34,6 +40,7 @@ const inquiryRateLimitWindowMs = 10 * 60 * 1000;
 const inquiryRateLimitMax = 6;
 const maxInquiryMessageLength = 3000;
 const invitationDefaultDays = 14;
+const passwordResetTokenHours = Number(process.env.PASSWORD_RESET_TOKEN_HOURS || 2);
 const allowedImageTypes = new Map([
   ["image/jpeg", ".jpg"],
   ["image/png", ".png"],
@@ -67,13 +74,34 @@ function nowIso() {
 }
 
 function redirect(response, location, statusCode = 303, headers = {}) {
-  response.writeHead(statusCode, { Location: location, ...headers });
+  response.writeHead(statusCode, secureHeaders({ Location: location, ...headers }));
   response.end();
 }
 
 function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  response.writeHead(statusCode, secureHeaders({
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store"
+  }));
   response.end(JSON.stringify(payload));
+}
+
+function secureHeaders(headers = {}) {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    ...headers
+  };
+}
+
+function sendHtml(response, statusCode, html, headers = {}) {
+  response.writeHead(statusCode, secureHeaders({
+    "Content-Type": "text/html; charset=utf-8",
+    ...headers
+  }));
+  response.end(html);
 }
 
 function parseCookies(request) {
@@ -191,6 +219,11 @@ function normalizeContent(content) {
     media: Array.isArray(content.media) ? content.media : [],
     inquiries: Array.isArray(content.inquiries) ? content.inquiries : [],
     invitations: Array.isArray(content.invitations) ? content.invitations : [],
+    notifications: Array.isArray(content.notifications) ? content.notifications : [],
+    emailLog: Array.isArray(content.emailLog) ? content.emailLog : [],
+    passwordResetTokens: Array.isArray(content.passwordResetTokens) ? content.passwordResetTokens : [],
+    adminAccounts: Array.isArray(content.adminAccounts) ? content.adminAccounts : [],
+    auditLog: Array.isArray(content.auditLog) ? content.auditLog : [],
     statusHistory: Array.isArray(content.statusHistory) ? content.statusHistory : [],
     artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : []
   };
@@ -221,7 +254,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "galleries", "artwork", "media", "inquiries", "invitations", "statusHistory", "artistAccounts"].forEach((collection) => {
+  ["artists", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -289,6 +322,184 @@ function loadContent() {
 
 function saveContent(content, reason = "save") {
   writeContent(content, { backup: true, reason });
+}
+
+function emailServiceStatus() {
+  const configured = Boolean(resendApiKey && emailFrom);
+  return {
+    configured,
+    provider: configured ? "resend" : "log-only",
+    mode: configured ? "live" : "log-only",
+    from: configured ? emailFrom : "",
+    publicContactEmail
+  };
+}
+
+function addAuditEvent(content, event = {}) {
+  content.auditLog.push({
+    id: generateId("audit"),
+    actorType: cleanString(event.actorType || "system"),
+    actorId: cleanLimitedString(event.actorId || "", 180),
+    action: cleanString(event.action || "event"),
+    targetType: cleanString(event.targetType || ""),
+    targetId: cleanLimitedString(event.targetId || "", 180),
+    summary: cleanLimitedString(event.summary || "", 500),
+    metadata: event.metadata && typeof event.metadata === "object" ? event.metadata : {},
+    createdAt: nowIso()
+  });
+}
+
+function addNotification(content, notification = {}) {
+  content.notifications.push({
+    id: generateId("notification"),
+    audience: cleanString(notification.audience || "admin"),
+    artistId: cleanString(notification.artistId || ""),
+    type: cleanString(notification.type || "system"),
+    title: cleanLimitedString(notification.title || "Notification", 160),
+    message: cleanLimitedString(notification.message || "", 900),
+    link: cleanString(notification.link || ""),
+    relatedType: cleanString(notification.relatedType || ""),
+    relatedId: cleanString(notification.relatedId || ""),
+    readAt: "",
+    createdAt: nowIso()
+  });
+}
+
+function notificationSafe(notification) {
+  return {
+    id: notification.id,
+    audience: notification.audience,
+    artistId: notification.artistId,
+    type: notification.type,
+    title: notification.title,
+    message: notification.message,
+    link: notification.link,
+    relatedType: notification.relatedType,
+    relatedId: notification.relatedId,
+    readAt: notification.readAt,
+    createdAt: notification.createdAt
+  };
+}
+
+function trimOperationalLogs(content) {
+  content.emailLog = content.emailLog.slice(-250);
+  content.notifications = content.notifications.slice(-500);
+  content.auditLog = content.auditLog.slice(-1000);
+  content.passwordResetTokens = content.passwordResetTokens.filter((token) =>
+    !token.usedAt && new Date(token.expiresAt).getTime() > Date.now() - 24 * 60 * 60 * 1000
+  );
+}
+
+function absoluteUrl(pathname = "/") {
+  if (/^https?:\/\//i.test(pathname)) {
+    return pathname;
+  }
+  return `${publicSiteUrl}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+}
+
+function recordEmail(content, email) {
+  const status = emailServiceStatus();
+  const logRecord = {
+    id: generateId("email"),
+    to: cleanLimitedString(email.to, 180),
+    subject: cleanLimitedString(email.subject, 240),
+    template: cleanString(email.template || "message"),
+    status: status.configured ? "queued" : "log-only",
+    provider: status.provider,
+    bodyText: cleanLimitedString(email.text, 5000),
+    createdAt: nowIso()
+  };
+  content.emailLog.push(logRecord);
+
+  if (status.configured && typeof fetch === "function") {
+    fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: emailFrom,
+        to: [email.to],
+        subject: email.subject,
+        text: email.text
+      })
+    }).catch((error) => {
+      console.error("Email send failed:", error.message);
+    });
+  } else {
+    console.log(`[email:${logRecord.status}] ${email.to} - ${email.subject}\n${email.text}`);
+  }
+}
+
+function emailTemplate(template, to, subject, lines) {
+  return {
+    template,
+    to,
+    subject,
+    text: [
+      "The Galleria.Art",
+      "",
+      ...lines.filter((line) => line !== null && line !== undefined),
+      "",
+      "The Galleria.Art"
+    ].join("\n")
+  };
+}
+
+function adminAccountFor(content, email = adminEmail) {
+  return content.adminAccounts.find((account) =>
+    account.email.toLowerCase() === email.toLowerCase() &&
+    account.status !== "archived"
+  ) || null;
+}
+
+function verifyAdminPassword(email, password) {
+  const content = loadContent();
+  const account = adminAccountFor(content, email);
+  if (account?.passwordHash && account?.passwordSalt) {
+    const hash = crypto.scryptSync(password, account.passwordSalt, 64).toString("hex");
+    return safeCompare(hash, account.passwordHash);
+  }
+  return email.toLowerCase() === adminEmail.toLowerCase() && verifyPassword(password);
+}
+
+function upsertAdminPassword(content, email, password) {
+  const now = nowIso();
+  const salt = crypto.randomBytes(16).toString("hex");
+  const nextHash = crypto.scryptSync(password, salt, 64).toString("hex");
+  let account = adminAccountFor(content, email);
+
+  if (!account) {
+    account = {
+      id: generateId("admin-account"),
+      email,
+      passwordHash: nextHash,
+      passwordSalt: salt,
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    };
+    content.adminAccounts.push(account);
+    return account;
+  }
+
+  account.passwordHash = nextHash;
+  account.passwordSalt = salt;
+  account.updatedAt = now;
+  return account;
+}
+
+function generatePasswordResetToken() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+function hashResetToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function passwordResetUrl(token) {
+  return absoluteUrl(`/password-reset/${encodeURIComponent(token)}/`);
 }
 
 function sortByDisplayOrder(left, right) {
@@ -454,13 +665,23 @@ function renderPublicArtistPage(artist) {
   );
   const heroImage = primaryGallery.coverImage || artist.heroImage || artworks[0]?.image || "";
   const location = [artist.city, artist.region, artist.country].filter(Boolean).join(", ");
+  const canonicalUrl = absoluteUrl(publicPathForArtist(artist));
+  const description = artist.shortDescription || `${artist.name} at The Galleria.Art`;
+  const shareImage = heroImage ? absoluteUrl(heroImage) : absoluteUrl("/images/whispers-main.jpeg");
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="${escapeHtml(artist.shortDescription || `${artist.name} at The Galleria.Art`)}">
+  <meta name="description" content="${escapeHtml(description)}">
+  <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
+  <meta property="og:title" content="${escapeHtml(`${artist.name} | The Galleria.Art`)}">
+  <meta property="og:description" content="${escapeHtml(description)}">
+  <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
+  <meta property="og:type" content="profile">
+  <meta property="og:image" content="${escapeHtml(shareImage)}">
+  <meta name="twitter:card" content="summary_large_image">
   <title>${escapeHtml(artist.name)} | The Galleria.Art</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -606,15 +827,80 @@ function sendPublicArtistPage(response, pathname) {
     return false;
   }
 
-  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  response.end(renderPublicArtistPage(publicArtist));
+  response.writeHead(200, secureHeaders({ "Content-Type": "text/html; charset=utf-8" }));
+  response.end(injectAnalytics(renderPublicArtistPage(publicArtist)));
   return true;
 }
 
 function sendPublicGalleryData(response) {
   const publicData = buildPublicData(loadContent());
-  response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+  response.writeHead(200, secureHeaders({ "Content-Type": "text/javascript; charset=utf-8" }));
   response.end(`window.GalleriaData = ${JSON.stringify(publicData, null, 2)};\n`);
+}
+
+function sitemapUrls() {
+  const content = loadContent();
+  const urls = new Set([
+    "/",
+    "/about/",
+    "/contact/",
+    "/privacy/",
+    "/terms/",
+    "/carolyn-elaine/"
+  ]);
+
+  buildPublicData(content).artists.forEach((artist) => {
+    urls.add(publicPathForArtist(artist));
+  });
+
+  return [...urls].sort().map((pathname) => absoluteUrl(pathname));
+}
+
+function sendSitemap(response) {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapUrls().map((url) => `  <url><loc>${escapeHtml(url)}</loc></url>`).join("\n")}\n</urlset>\n`;
+  response.writeHead(200, secureHeaders({ "Content-Type": "application/xml; charset=utf-8" }));
+  response.end(xml);
+}
+
+function sendRobots(response) {
+  response.writeHead(200, secureHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
+  response.end([
+    "User-agent: *",
+    "Disallow: /admin/",
+    "Disallow: /artist/",
+    "Disallow: /invite/",
+    "Disallow: /password-reset/",
+    "Disallow: /api/",
+    "",
+    `Sitemap: ${absoluteUrl("/sitemap.xml")}`,
+    ""
+  ].join("\n"));
+}
+
+function analyticsSnippet() {
+  if (!analyticsId) {
+    return "";
+  }
+
+  if (analyticsProvider === "plausible" || analyticsId.includes(".")) {
+    return `<script defer data-domain="${escapeHtml(analyticsId)}" src="https://plausible.io/js/script.js"></script>`;
+  }
+
+  return "";
+}
+
+function injectAnalytics(html) {
+  const snippet = analyticsSnippet();
+  return snippet ? html.replace("</head>", `  ${snippet}\n</head>`) : html;
+}
+
+function shouldInjectAnalytics(filePath) {
+  if (path.extname(filePath).toLowerCase() !== ".html" || !analyticsId) {
+    return false;
+  }
+
+  const relative = path.relative(publicDir, filePath);
+  return !relative.startsWith("admin/") && !relative.startsWith("artist/");
 }
 
 function serveUploadedMedia(response, pathname) {
@@ -643,33 +929,32 @@ function serveUploadedMedia(response, pathname) {
 function sendFile(response, filePath, statusCode = 200) {
   fs.readFile(filePath, (error, content) => {
     if (error) {
-      response.writeHead(error.code === "ENOENT" ? 404 : 500, {
+      response.writeHead(error.code === "ENOENT" ? 404 : 500, secureHeaders({
         "Content-Type": "text/plain; charset=utf-8"
-      });
+      }));
       response.end(error.code === "ENOENT" ? "Not found" : "Server error");
       return;
     }
 
-    response.writeHead(statusCode, {
-      "Content-Type": mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream"
-    });
-    response.end(content);
+    const contentType = mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+    response.writeHead(statusCode, secureHeaders({ "Content-Type": contentType }));
+    response.end(shouldInjectAnalytics(filePath) ? injectAnalytics(content.toString("utf8")) : content);
   });
 }
 
 function sendAdminFile(response, filePath, session) {
   fs.readFile(filePath, "utf8", (error, content) => {
     if (error) {
-      response.writeHead(error.code === "ENOENT" ? 404 : 500, {
+      response.writeHead(error.code === "ENOENT" ? 404 : 500, secureHeaders({
         "Content-Type": "text/plain; charset=utf-8"
-      });
+      }));
       response.end(error.code === "ENOENT" ? "Not found" : "Server error");
       return;
     }
 
-    response.writeHead(200, {
+    response.writeHead(200, secureHeaders({
       "Content-Type": mimeTypes[path.extname(filePath).toLowerCase()] || "text/plain; charset=utf-8"
-    });
+    }));
 
     if (path.extname(filePath).toLowerCase() === ".html") {
       response.end(content.replaceAll("{{ADMIN_EMAIL}}", escapeHtml(session.email)));
@@ -683,16 +968,16 @@ function sendAdminFile(response, filePath, session) {
 function sendArtistFile(response, filePath, context) {
   fs.readFile(filePath, "utf8", (error, content) => {
     if (error) {
-      response.writeHead(error.code === "ENOENT" ? 404 : 500, {
+      response.writeHead(error.code === "ENOENT" ? 404 : 500, secureHeaders({
         "Content-Type": "text/plain; charset=utf-8"
-      });
+      }));
       response.end(error.code === "ENOENT" ? "Not found" : "Server error");
       return;
     }
 
-    response.writeHead(200, {
+    response.writeHead(200, secureHeaders({
       "Content-Type": mimeTypes[path.extname(filePath).toLowerCase()] || "text/plain; charset=utf-8"
-    });
+    }));
 
     if (path.extname(filePath).toLowerCase() === ".html") {
       response.end(content
@@ -1010,6 +1295,15 @@ async function processMediaUpload(upload, options = {}) {
       status: "ready",
       errorMessage: ""
     });
+    addAuditEvent(finalContent, {
+      actorType: options.uploadedBy === "artist" ? "artist" : "admin",
+      actorId: options.ownerArtistId || adminEmail,
+      action: "media.uploaded",
+      targetType: "media",
+      targetId: mediaId,
+      summary: `Media uploaded: ${upload.originalFilename}`
+    });
+    trimOperationalLogs(finalContent);
     saveContent(finalContent, "media-processing-ready");
     return { ok: true, media: readyRecord, content: finalContent };
   } catch (error) {
@@ -1467,6 +1761,15 @@ function upsertRecord(resource, input) {
     collection.push(record);
   }
 
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: adminEmail,
+    action: existing ? `${resource}.updated` : `${resource}.created`,
+    targetType: resource,
+    targetId: record.id,
+    summary: `${resource} ${existing ? "updated" : "created"}: ${record.name || record.title || record.id}`
+  });
+  trimOperationalLogs(content);
   saveContent(content, `${resource}-save`);
   return {
     ok: true,
@@ -1493,6 +1796,15 @@ function archiveRecord(resource, id) {
   record.status = "archived";
   record.featured = false;
   record.updatedAt = nowIso();
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: adminEmail,
+    action: `${resource}.archived`,
+    targetType: resource,
+    targetId: record.id,
+    summary: `${resource} archived: ${record.name || record.title || record.id}`
+  });
+  trimOperationalLogs(content);
   saveContent(content, `${resource}-archive`);
 
   return {
@@ -1576,6 +1888,15 @@ function archiveMedia(id) {
 
   media.status = "archived";
   media.updatedAt = nowIso();
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: adminEmail,
+    action: "media.archived",
+    targetType: "media",
+    targetId: media.id,
+    summary: `Media archived: ${media.originalFilename || media.publicPath}`
+  });
+  trimOperationalLogs(content);
   saveContent(content, "media-archive");
 
   return {
@@ -1757,6 +2078,43 @@ function handlePublicInquiry(request, response) {
     };
 
     content.inquiries.push(result.record);
+    const context = inquiryContext(content, result.record);
+    addNotification(content, {
+      audience: "admin",
+      type: "inquiry_received",
+      title: "New collector inquiry",
+      message: `${result.record.visitorName} sent an inquiry${context.artist?.name ? ` for ${context.artist.name}` : ""}.`,
+      link: "/admin/inquiries/",
+      relatedType: "inquiry",
+      relatedId: result.record.id
+    });
+    if (context.artist) {
+      addNotification(content, {
+        audience: "artist",
+        artistId: context.artist.id,
+        type: "inquiry_received",
+        title: "New collector inquiry",
+        message: `${result.record.visitorName} sent an inquiry through The Galleria.Art.`,
+        link: "/artist/inquiries/",
+        relatedType: "inquiry",
+        relatedId: result.record.id
+      });
+    }
+    addAuditEvent(content, {
+      actorType: "public",
+      actorId: result.record.visitorEmail,
+      action: "inquiry.created",
+      targetType: "inquiry",
+      targetId: result.record.id,
+      summary: "Collector inquiry submitted",
+      metadata: {
+        artistId: context.artist?.id || "",
+        galleryId: result.record.galleryId || "",
+        artworkId: result.record.artworkId || ""
+      }
+    });
+    queueInquiryEmails(content, result.record);
+    trimOperationalLogs(content);
     saveContent(content, "inquiry-create");
     sendJson(response, 200, {
       ok: true,
@@ -1829,6 +2187,15 @@ function updateInquiry(id, input, options = {}) {
     inquiry.internalNotes = cleanLimitedString(input.internalNotes, 4000);
   }
 
+  addAuditEvent(content, {
+    actorType: options.admin ? "admin" : "artist",
+    actorId: options.admin ? adminEmail : options.artistId,
+    action: "inquiry.updated",
+    targetType: "inquiry",
+    targetId: inquiry.id,
+    summary: `Inquiry status changed to ${status}`
+  });
+  trimOperationalLogs(content);
   saveContent(content, "inquiry-update");
   return {
     ok: true,
@@ -1845,6 +2212,119 @@ function requestOrigin(request) {
 
 function invitationUrl(request, invitation) {
   return `${requestOrigin(request)}/invite/${encodeURIComponent(invitation.token)}`;
+}
+
+function artistById(content, id) {
+  return content.artists.find((artist) => artist.id === id) || null;
+}
+
+function galleryById(content, id) {
+  return content.galleries.find((gallery) => gallery.id === id) || null;
+}
+
+function artworkById(content, id) {
+  return content.artwork.find((artwork) => artwork.id === id) || null;
+}
+
+function inquiryContext(content, inquiry) {
+  const artist = artistById(content, inquiry.artistId || inquiry.assignedArtistId) ||
+    artistById(content, galleryById(content, inquiry.galleryId)?.artistId) ||
+    artistById(content, artworkById(content, inquiry.artworkId)?.artistId);
+  const gallery = galleryById(content, inquiry.galleryId);
+  const artwork = artworkById(content, inquiry.artworkId);
+  return { artist, gallery, artwork };
+}
+
+function reviewContext(content, type, record) {
+  const artistId = reviewRecordArtistId(record, type);
+  return {
+    artist: artistById(content, artistId),
+    title: recordTitle(record, type),
+    type
+  };
+}
+
+function queueInvitationEmail(content, invitation, request) {
+  recordEmail(content, emailTemplate("artist-invitation", invitation.email, "Your invitation to The Galleria.Art", [
+    "You have been invited to create your private artist portal for The Galleria.Art.",
+    "",
+    `Invitation link: ${invitationUrl(request, invitation)}`,
+    `Expires: ${new Date(invitation.expiresAt).toLocaleString()}`,
+    "",
+    "Use this secure link to set your password and begin preparing your gallery profile."
+  ]));
+}
+
+function queueInvitationAcceptedEmail(content, invitation, artist) {
+  recordEmail(content, emailTemplate("invitation-accepted-admin", adminEmail, "Artist invitation accepted", [
+    `${artist.name || invitation.email} accepted an artist invitation.`,
+    `Artist: ${artist.name || ""}`,
+    `Email: ${invitation.email}`,
+    `Admin: ${absoluteUrl("/admin/artists/")}`
+  ]));
+}
+
+function queueInquiryEmails(content, inquiry) {
+  const context = inquiryContext(content, inquiry);
+  const contextLine = [context.artist?.name, context.gallery?.title, context.artwork?.title].filter(Boolean).join(" / ") || "General inquiry";
+  const lines = [
+    `From: ${inquiry.visitorName} <${inquiry.visitorEmail}>`,
+    inquiry.visitorPhone ? `Phone: ${inquiry.visitorPhone}` : "",
+    `Context: ${contextLine}`,
+    `Source: ${inquiry.sourceUrl || ""}`,
+    "",
+    inquiry.message
+  ];
+
+  recordEmail(content, emailTemplate("collector-inquiry-admin", adminEmail, "New collector inquiry", lines));
+
+  if (context.artist?.contactEmail && isValidEmail(context.artist.contactEmail)) {
+    recordEmail(content, emailTemplate("collector-inquiry-artist", context.artist.contactEmail, "New inquiry through The Galleria.Art", [
+      `A visitor sent an inquiry about ${contextLine}.`,
+      "",
+      `From: ${inquiry.visitorName} <${inquiry.visitorEmail}>`,
+      inquiry.visitorPhone ? `Phone: ${inquiry.visitorPhone}` : "",
+      `Preferred contact: ${inquiry.preferredContactMethod || "email"}`,
+      "",
+      inquiry.message
+    ]));
+  }
+}
+
+function queueReviewSubmittedEmail(content, type, record) {
+  const context = reviewContext(content, type, record);
+  recordEmail(content, emailTemplate("review-submitted-admin", adminEmail, "Artist item submitted for review", [
+    `${context.artist?.name || "An artist"} submitted ${context.type}: ${context.title}.`,
+    `Review queue: ${absoluteUrl("/admin/review/")}`
+  ]));
+}
+
+function queueReviewDecisionEmail(content, type, record, action, note) {
+  const context = reviewContext(content, type, record);
+  const subject = action === "changes_requested" ? "Changes requested on The Galleria.Art" : "Your Galleria.Art submission was updated";
+  const artistEmail = context.artist?.contactEmail;
+  if (!artistEmail || !isValidEmail(artistEmail)) {
+    return;
+  }
+
+  recordEmail(content, emailTemplate(action === "changes_requested" ? "review-changes-requested" : "review-approved-published", artistEmail, subject, [
+    `${context.type}: ${context.title}`,
+    `Status: ${action}`,
+    note ? `Admin note: ${note}` : "",
+    "",
+    `Artist portal: ${absoluteUrl("/artist/")}`
+  ]));
+}
+
+function queuePasswordResetEmail(content, email, token) {
+  recordEmail(content, emailTemplate("password-reset", email, "Reset your The Galleria.Art password", [
+    "A password reset was requested for this email address.",
+    "",
+    `Reset link: ${passwordResetUrl(token)}`,
+    `This link expires in ${passwordResetTokenHours} hour${passwordResetTokenHours === 1 ? "" : "s"}.`,
+    "",
+    "If you did not request this, you can ignore this message."
+  ]));
 }
 
 function slugify(value) {
@@ -1985,6 +2465,25 @@ function createInvitation(input, session, request) {
   };
 
   content.invitations.push(invitation);
+  addNotification(content, {
+    audience: "admin",
+    type: "invitation_created",
+    title: "Invitation created",
+    message: `Invitation prepared for ${email}.`,
+    link: "/admin/invitations/",
+    relatedType: "invitation",
+    relatedId: invitation.id
+  });
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: session?.email || adminEmail,
+    action: "invitation.created",
+    targetType: "invitation",
+    targetId: invitation.id,
+    summary: `Invitation created for ${email}`
+  });
+  queueInvitationEmail(content, invitation, request);
+  trimOperationalLogs(content);
   saveContent(content, "invitation-create");
   return {
     ok: true,
@@ -2011,6 +2510,15 @@ function revokeInvitation(id) {
   invitation.status = "revoked";
   invitation.revokedAt = nowIso();
   invitation.updatedAt = nowIso();
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: adminEmail,
+    action: "invitation.revoked",
+    targetType: "invitation",
+    targetId: invitation.id,
+    summary: `Invitation revoked for ${invitation.email}`
+  });
+  trimOperationalLogs(content);
   saveContent(content, "invitation-revoke");
   return {
     ok: true,
@@ -2139,15 +2647,249 @@ function renderInvitePage(invitation, options = {}) {
 </html>`;
 }
 
+function renderPasswordResetRequestPage(options = {}) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Password Reset | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page admin-login-page">
+  <main class="admin-login-shell">
+    <section class="admin-card admin-login-card" aria-labelledby="reset-title">
+      <p class="section-kicker">Account Access</p>
+      <h1 id="reset-title">Reset Password</h1>
+      ${options.sent ? '<p class="admin-message success"><strong>If that account exists, a reset email has been prepared.</strong></p>' : ""}
+      <p class="admin-muted">Enter the email for an admin or artist account. Reset links expire quickly and can only be used once.</p>
+      <form class="admin-form" action="/password-reset/" method="post">
+        <label>
+          <span>Account Type</span>
+          <select name="accountType">
+            <option value="artist">Artist</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" autocomplete="username" required>
+        </label>
+        <button class="home-button admin-submit" type="submit">Send Reset Link</button>
+      </form>
+      <a class="admin-return" href="/">Return to public site</a>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function resetTokenRecord(content, token) {
+  const tokenHash = hashResetToken(token);
+  return content.passwordResetTokens.find((record) => record.tokenHash === tokenHash) || null;
+}
+
+function resetTokenUnavailable(record) {
+  if (!record || record.usedAt) {
+    return "This reset link is invalid or has already been used.";
+  }
+
+  if (new Date(record.expiresAt).getTime() <= Date.now()) {
+    return "This reset link has expired.";
+  }
+
+  return "";
+}
+
+function renderPasswordResetForm(token, options = {}) {
+  const unavailable = options.unavailable || "";
+  const errors = options.errors || [];
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Set New Password | The Galleria.Art</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page admin-login-page">
+  <main class="admin-login-shell">
+    <section class="admin-card admin-login-card" aria-labelledby="reset-form-title">
+      <p class="section-kicker">Account Access</p>
+      <h1 id="reset-form-title">Set New Password</h1>
+      ${unavailable ? `
+        <p class="admin-alert">${escapeHtml(unavailable)}</p>
+        <a class="admin-return" href="/password-reset/">Request a new reset link</a>
+      ` : `
+        ${errors.length ? `<div class="admin-message error"><strong>Please fix the highlighted fields.</strong><ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></div>` : ""}
+        <form class="admin-form" action="/password-reset/${encodeURIComponent(token)}/" method="post">
+          <label>
+            <span>New Password</span>
+            <input name="password" type="password" autocomplete="new-password" required>
+          </label>
+          <label>
+            <span>Confirm Password</span>
+            <input name="confirmPassword" type="password" autocomplete="new-password" required>
+          </label>
+          <button class="home-button admin-submit" type="submit">Change Password</button>
+        </form>
+      `}
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function findPasswordResetAccount(content, accountType, email) {
+  if (accountType === "admin") {
+    return email.toLowerCase() === adminEmail.toLowerCase() || adminAccountFor(content, email)
+      ? { accountType: "admin", email, targetId: email }
+      : null;
+  }
+
+  const account = content.artistAccounts.find((item) =>
+    item.email.toLowerCase() === email.toLowerCase() &&
+    item.status !== "archived"
+  );
+  return account ? { accountType: "artist", email: account.email, targetId: account.artistId } : null;
+}
+
+function handlePasswordResetRequest(request, response) {
+  collectBody(request, (body) => {
+    const input = Object.fromEntries(new URLSearchParams(body));
+    const email = cleanLimitedString(input.email, 180).toLowerCase();
+    const accountType = cleanString(input.accountType) === "admin" ? "admin" : "artist";
+    const content = loadContent();
+    const account = findPasswordResetAccount(content, accountType, email);
+
+    if (account) {
+      const token = generatePasswordResetToken();
+      const now = nowIso();
+      const expires = new Date();
+      expires.setHours(expires.getHours() + passwordResetTokenHours);
+      content.passwordResetTokens.push({
+        id: generateId("password-reset"),
+        tokenHash: hashResetToken(token),
+        accountType: account.accountType,
+        email: account.email,
+        targetId: account.targetId,
+        expiresAt: expires.toISOString(),
+        usedAt: "",
+        createdAt: now
+      });
+      addNotification(content, {
+        audience: account.accountType === "admin" ? "admin" : "artist",
+        artistId: account.accountType === "artist" ? account.targetId : "",
+        type: "password_reset_requested",
+        title: "Password reset requested",
+        message: "A password reset link was requested for this account.",
+        link: account.accountType === "admin" ? "/admin/settings/" : "/artist/",
+        relatedType: "account",
+        relatedId: account.targetId
+      });
+      addAuditEvent(content, {
+        actorType: account.accountType,
+        actorId: account.email,
+        action: "password_reset.requested",
+        targetType: "account",
+        targetId: account.targetId,
+        summary: "Password reset requested"
+      });
+      queuePasswordResetEmail(content, account.email, token);
+      trimOperationalLogs(content);
+      saveContent(content, "password-reset-request");
+    } else {
+      addAuditEvent(content, {
+        actorType: accountType,
+        actorId: email,
+        action: "password_reset.requested_unknown",
+        targetType: "account",
+        targetId: "",
+        summary: "Password reset requested for unknown account"
+      });
+      trimOperationalLogs(content);
+      saveContent(content, "password-reset-request-unknown");
+    }
+
+    sendHtml(response, 200, renderPasswordResetRequestPage({ sent: true }));
+  });
+}
+
+function sendPasswordResetForm(response, token) {
+  const content = loadContent();
+  const record = resetTokenRecord(content, token);
+  const unavailable = resetTokenUnavailable(record);
+  sendHtml(response, unavailable ? 404 : 200, renderPasswordResetForm(token, { unavailable }));
+}
+
+function handlePasswordResetComplete(request, response, token) {
+  collectBody(request, (body) => {
+    const input = Object.fromEntries(new URLSearchParams(body));
+    const content = loadContent();
+    const record = resetTokenRecord(content, token);
+    const unavailable = resetTokenUnavailable(record);
+
+    if (unavailable) {
+      sendHtml(response, 409, renderPasswordResetForm(token, { unavailable }));
+      return;
+    }
+
+    const errors = validateInvitePassword(input.password || "", input.confirmPassword || "");
+    if (errors.length) {
+      sendHtml(response, 422, renderPasswordResetForm(token, { errors }));
+      return;
+    }
+
+    if (record.accountType === "admin") {
+      upsertAdminPassword(content, record.email, input.password || "");
+    } else {
+      const account = content.artistAccounts.find((item) =>
+        item.email.toLowerCase() === record.email.toLowerCase() &&
+        item.status !== "archived"
+      );
+      if (!account) {
+        sendHtml(response, 404, renderPasswordResetForm(token, { unavailable: "This account could not be found." }));
+        return;
+      }
+      const salt = crypto.randomBytes(16).toString("hex");
+      account.passwordHash = hashArtistPassword(input.password || "", salt);
+      account.passwordSalt = salt;
+      account.updatedAt = nowIso();
+    }
+
+    record.usedAt = nowIso();
+    addNotification(content, {
+      audience: record.accountType === "admin" ? "admin" : "artist",
+      artistId: record.accountType === "artist" ? record.targetId : "",
+      type: "password_changed",
+      title: "Password changed",
+      message: "The password for this account was changed through password recovery.",
+      link: record.accountType === "admin" ? "/admin/login/" : "/artist/login/",
+      relatedType: "account",
+      relatedId: record.targetId
+    });
+    addAuditEvent(content, {
+      actorType: record.accountType,
+      actorId: record.email,
+      action: "password_reset.completed",
+      targetType: "account",
+      targetId: record.targetId,
+      summary: "Password reset completed"
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "password-reset-complete");
+    redirect(response, record.accountType === "admin" ? "/admin/login/?reset=1" : "/artist/login/?reset=1");
+  });
+}
+
 function sendInvitePage(request, response, token) {
   const content = loadContent();
   const invitation = refreshInvitationStatus(content, findInvitationByToken(content, token));
   const artist = invitation?.artistId ? content.artists.find((item) => item.id === invitation.artistId) : null;
 
-  response.writeHead(invitation && !invitationUnavailableReason(invitation) ? 200 : 404, {
-    "Content-Type": "text/html; charset=utf-8"
-  });
-  response.end(renderInvitePage(invitation, { artist }));
+  sendHtml(response, invitation && !invitationUnavailableReason(invitation) ? 200 : 404, renderInvitePage(invitation, { artist }));
 }
 
 function acceptInvitation(request, response, token) {
@@ -2158,8 +2900,7 @@ function acceptInvitation(request, response, token) {
     const unavailable = invitationUnavailableReason(invitation);
 
     if (unavailable) {
-      response.writeHead(409, { "Content-Type": "text/html; charset=utf-8" });
-      response.end(renderInvitePage(invitation));
+      sendHtml(response, 409, renderInvitePage(invitation));
       return;
     }
 
@@ -2172,8 +2913,7 @@ function acceptInvitation(request, response, token) {
 
     if (errors.length) {
       const artist = invitation.artistId ? content.artists.find((item) => item.id === invitation.artistId) : null;
-      response.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
-      response.end(renderInvitePage(invitation, { artist, errors, input }));
+      sendHtml(response, 422, renderInvitePage(invitation, { artist, errors, input }));
       return;
     }
 
@@ -2254,6 +2994,35 @@ function acceptInvitation(request, response, token) {
     invitation.status = "accepted";
     invitation.acceptedAt = now;
     invitation.updatedAt = now;
+    addNotification(content, {
+      audience: "admin",
+      type: "invitation_accepted",
+      title: "Invitation accepted",
+      message: `${artist.name} accepted an artist invitation.`,
+      link: "/admin/artists/",
+      relatedType: "artist",
+      relatedId: artist.id
+    });
+    addNotification(content, {
+      audience: "artist",
+      artistId: artist.id,
+      type: "invitation_accepted",
+      title: "Welcome to The Galleria.Art",
+      message: "Your artist portal is active. You can prepare your profile, galleries, artwork, and submit updates for review.",
+      link: "/artist/",
+      relatedType: "artist",
+      relatedId: artist.id
+    });
+    addAuditEvent(content, {
+      actorType: "artist",
+      actorId: invitation.email,
+      action: "invitation.accepted",
+      targetType: "artist",
+      targetId: artist.id,
+      summary: `${artist.name} accepted an invitation`
+    });
+    queueInvitationAcceptedEmail(content, invitation, artist);
+    trimOperationalLogs(content);
     saveContent(content, "invitation-accept");
     redirect(response, "/artist/", 303, {
       "Set-Cookie": createArtistSessionCookie(account, request)
@@ -2364,6 +3133,35 @@ function submitReviewRecord(context, type, id, input) {
     adminReviewNote: ""
   });
 
+  addNotification(content, {
+    audience: "admin",
+    type: "review_submitted",
+    title: "Artist item submitted",
+    message: `${context.artist.name} submitted ${type}: ${recordTitle(record, type)}.`,
+    link: "/admin/review/",
+    relatedType: type,
+    relatedId: record.id
+  });
+  addNotification(content, {
+    audience: "artist",
+    artistId: context.artist.id,
+    type: "review_submitted",
+    title: "Submitted for review",
+    message: `${recordTitle(record, type)} is now waiting for admin review.`,
+    link: "/artist/",
+    relatedType: type,
+    relatedId: record.id
+  });
+  addAuditEvent(content, {
+    actorType: "artist",
+    actorId: context.account.email,
+    action: "review.submitted",
+    targetType: type,
+    targetId: record.id,
+    summary: `${recordTitle(record, type)} submitted for review`
+  });
+  queueReviewSubmittedEmail(content, type, record);
+  trimOperationalLogs(content);
   saveContent(content, "review-submit");
   return {
     ok: true,
@@ -2400,6 +3198,27 @@ function adminReviewRecord(type, id, input, session) {
     reviewUpdatedAt: now
   });
 
+  const artistId = reviewRecordArtistId(record, type);
+  addNotification(content, {
+    audience: "artist",
+    artistId,
+    type: action === "changes_requested" ? "changes_requested" : "published",
+    title: action === "changes_requested" ? "Changes requested" : "Review updated",
+    message: `${recordTitle(record, type)} was marked ${action}.`,
+    link: "/artist/",
+    relatedType: type,
+    relatedId: record.id
+  });
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: session?.email || adminEmail,
+    action: `review.${action}`,
+    targetType: type,
+    targetId: record.id,
+    summary: `${recordTitle(record, type)} marked ${action}`
+  });
+  queueReviewDecisionEmail(content, type, record, action, note);
+  trimOperationalLogs(content);
   saveContent(content, "review-admin-action");
   return {
     ok: true,
@@ -2419,8 +3238,23 @@ function verifyArtistPassword(password, account) {
 }
 
 function publicSafeContent(content) {
+  const {
+    passwordResetTokens,
+    adminAccounts,
+    artistAccounts,
+    ...safeContent
+  } = content;
+
   return {
-    ...content,
+    ...safeContent,
+    emailStatus: emailServiceStatus(),
+    adminAccounts: (adminAccounts || []).map((account) => ({
+      id: account.id,
+      email: account.email,
+      status: account.status,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt
+    })),
     artistAccounts: (content.artistAccounts || []).map((account) => ({
       id: account.id,
       artistId: account.artistId,
@@ -2431,6 +3265,16 @@ function publicSafeContent(content) {
       updatedAt: account.updatedAt,
       acceptedAt: account.acceptedAt,
       lastLoginAt: account.lastLoginAt
+    })),
+    emailLog: (content.emailLog || []).map((email) => ({
+      id: email.id,
+      to: email.to,
+      subject: email.subject,
+      template: email.template,
+      status: email.status,
+      provider: email.provider,
+      bodyText: email.bodyText,
+      createdAt: email.createdAt
     }))
   };
 }
@@ -2515,6 +3359,9 @@ function buildArtistPortalContent(context) {
     artwork,
     media: artistScopedMedia(context.content, context.artist, galleries, artwork),
     inquiries: artistScopedInquiries(context.content, context.artist.id),
+    notifications: context.content.notifications
+      .filter((notification) => notification.audience === "artist" && notification.artistId === context.artist.id)
+      .map(notificationSafe),
     statusHistory: context.content.statusHistory.filter((entry) => ownedIds.has(entry.recordId))
   };
 }
@@ -2537,6 +3384,53 @@ function requireArtistForApi(request, response) {
   return null;
 }
 
+function markNotificationRead(content, id, scope = {}) {
+  const notification = content.notifications.find((item) => item.id === id);
+  if (!notification) {
+    return { ok: false, statusCode: 404, message: "Notification was not found." };
+  }
+
+  if (scope.artistId && (notification.audience !== "artist" || notification.artistId !== scope.artistId)) {
+    return { ok: false, statusCode: 404, message: "Notification was not found." };
+  }
+
+  notification.readAt = notification.readAt || nowIso();
+  return { ok: true, statusCode: 200, message: "Notification marked as read.", notification };
+}
+
+function exportPublicContent(content) {
+  return buildPublicData(content);
+}
+
+function exportOperationalContent(content) {
+  const safe = publicSafeContent(content);
+  return {
+    exportedAt: nowIso(),
+    artists: safe.artists,
+    galleries: safe.galleries,
+    artwork: safe.artwork,
+    media: safe.media,
+    inquiries: safe.inquiries,
+    invitations: safe.invitations.map((invitation) => ({
+      ...invitation,
+      token: invitation.token ? "[redacted]" : ""
+    })),
+    notifications: safe.notifications,
+    emailLog: safe.emailLog,
+    auditLog: safe.auditLog,
+    statusHistory: safe.statusHistory
+  };
+}
+
+function sendExportJson(response, filename, payload) {
+  response.writeHead(200, secureHeaders({
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Cache-Control": "no-store"
+  }));
+  response.end(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
 function handleArtistLogin(request, response) {
   collectBody(request, (body) => {
     const form = new URLSearchParams(body);
@@ -2551,6 +3445,15 @@ function handleArtistLogin(request, response) {
     if (account && verifyArtistPassword(password, account)) {
       account.lastLoginAt = nowIso();
       account.updatedAt = nowIso();
+      addAuditEvent(content, {
+        actorType: "artist",
+        actorId: email,
+        action: "auth.login.success",
+        targetType: "artist",
+        targetId: account.artistId,
+        summary: "Artist login successful"
+      });
+      trimOperationalLogs(content);
       saveContent(content, "artist-login");
       redirect(response, "/artist/", 303, {
         "Set-Cookie": createArtistSessionCookie(account, request)
@@ -2558,6 +3461,16 @@ function handleArtistLogin(request, response) {
       return;
     }
 
+    addAuditEvent(content, {
+      actorType: "artist",
+      actorId: email,
+      action: "auth.login.failure",
+      targetType: "artist",
+      targetId: "",
+      summary: "Artist login failed"
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "artist-login-failed");
     redirect(response, "/artist/login/?error=1");
   });
 }
@@ -2705,6 +3618,21 @@ function handleArtistApi(request, response, pathname) {
     return;
   }
 
+  const artistNotificationReadMatch = pathname.match(/^\/artist\/api\/notifications\/([^/]+)\/read$/);
+  if (request.method === "POST" && artistNotificationReadMatch) {
+    const content = loadContent();
+    const result = markNotificationRead(content, decodeURIComponent(artistNotificationReadMatch[1]), { artistId: context.artist.id });
+    if (result.ok) {
+      saveContent(content, "artist-notification-read");
+    }
+    sendJson(response, result.statusCode, {
+      ok: result.ok,
+      message: result.message,
+      content: buildArtistPortalContent({ ...context, content })
+    });
+    return;
+  }
+
   if (request.method === "POST" && pathname === "/artist/api/media/upload") {
     handleMediaUpload(request, response, {
       uploadedBy: "artist",
@@ -2803,6 +3731,40 @@ function handleAdminApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/admin/api/content") {
     sendJson(response, 200, { ok: true, content: publicSafeContent(loadContent()) });
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/admin/api/exports/public.json") {
+    sendExportJson(response, "galleria-public-content.json", exportPublicContent(loadContent()));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/admin/api/exports/operational.json") {
+    sendExportJson(response, "galleria-operational-backup.json", exportOperationalContent(loadContent()));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/admin/api/exports/inquiries.json") {
+    const content = loadContent();
+    sendExportJson(response, "galleria-inquiries.json", {
+      exportedAt: nowIso(),
+      inquiries: content.inquiries || []
+    });
+    return;
+  }
+
+  const adminNotificationReadMatch = pathname.match(/^\/admin\/api\/notifications\/([^/]+)\/read$/);
+  if (request.method === "POST" && adminNotificationReadMatch) {
+    const content = loadContent();
+    const result = markNotificationRead(content, decodeURIComponent(adminNotificationReadMatch[1]));
+    if (result.ok) {
+      saveContent(content, "admin-notification-read");
+    }
+    sendJson(response, result.statusCode, {
+      ok: result.ok,
+      message: result.message,
+      content: publicSafeContent(content)
+    });
     return;
   }
 
@@ -2905,8 +3867,7 @@ function handleAdminApi(request, response, pathname) {
 }
 
 function sendPreviewPage(response, artist) {
-  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  response.end(renderPublicArtistPage(artist).replace("</body>", '<div class="preview-ribbon">Private Preview</div></body>'));
+  sendHtml(response, 200, renderPublicArtistPage(artist).replace("</body>", '<div class="preview-ribbon">Private Preview</div></body>'));
 }
 
 function sendAdminPreview(request, response, artistId) {
@@ -2948,13 +3909,35 @@ function handleLogin(request, response) {
     const email = (form.get("email") || "").trim().toLowerCase();
     const password = form.get("password") || "";
 
-    if (email === adminEmail.toLowerCase() && verifyPassword(password)) {
+    if (verifyAdminPassword(email, password)) {
+      const content = loadContent();
+      addAuditEvent(content, {
+        actorType: "admin",
+        actorId: email,
+        action: "auth.login.success",
+        targetType: "admin",
+        targetId: email,
+        summary: "Admin login successful"
+      });
+      trimOperationalLogs(content);
+      saveContent(content, "admin-login");
       redirect(response, "/admin/", 303, {
-        "Set-Cookie": createSessionCookie(adminEmail, request)
+        "Set-Cookie": createSessionCookie(email, request)
       });
       return;
     }
 
+    const content = loadContent();
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: email,
+      action: "auth.login.failure",
+      targetType: "admin",
+      targetId: email,
+      summary: "Admin login failed"
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "admin-login-failed");
     redirect(response, "/admin/login/?error=1");
   });
 }
@@ -3001,6 +3984,16 @@ function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/gallery-data.js") {
     sendPublicGalleryData(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/sitemap.xml") {
+    sendSitemap(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/robots.txt") {
+    sendRobots(response);
     return;
   }
 
@@ -3064,6 +4057,32 @@ function handleRequest(request, response) {
     return;
   }
 
+  if (pathname === "/password-reset") {
+    redirect(response, "/password-reset/", 301);
+    return;
+  }
+
+  if (pathname === "/password-reset/" && request.method === "GET") {
+    sendHtml(response, 200, renderPasswordResetRequestPage());
+    return;
+  }
+
+  if (pathname === "/password-reset/" && request.method === "POST") {
+    handlePasswordResetRequest(request, response);
+    return;
+  }
+
+  const passwordResetMatch = pathname.match(/^\/password-reset\/([^/]+)\/?$/);
+  if (passwordResetMatch && request.method === "GET") {
+    sendPasswordResetForm(response, decodeURIComponent(passwordResetMatch[1]));
+    return;
+  }
+
+  if (passwordResetMatch && request.method === "POST") {
+    handlePasswordResetComplete(request, response, decodeURIComponent(passwordResetMatch[1]));
+    return;
+  }
+
   const inviteMatch = pathname.match(/^\/invite\/([^/]+)\/?$/);
   if (inviteMatch && request.method === "GET") {
     sendInvitePage(request, response, decodeURIComponent(inviteMatch[1]));
@@ -3087,7 +4106,7 @@ function handleRequest(request, response) {
   }
 
   if (request.method !== "GET" && request.method !== "HEAD") {
-    response.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
+    response.writeHead(405, secureHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
     response.end("Method not allowed");
     return;
   }

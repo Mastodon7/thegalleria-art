@@ -10,6 +10,10 @@
     inquiries: [],
     invitations: [],
     artistAccounts: [],
+    notifications: [],
+    emailLog: [],
+    auditLog: [],
+    emailStatus: {},
     statusHistory: [],
     selectedInquiryId: "",
     selectedReviewId: ""
@@ -330,6 +334,10 @@
     state.inquiries = content.inquiries || [];
     state.invitations = content.invitations || [];
     state.artistAccounts = content.artistAccounts || [];
+    state.notifications = content.notifications || [];
+    state.emailLog = content.emailLog || [];
+    state.auditLog = content.auditLog || [];
+    state.emailStatus = content.emailStatus || {};
     state.statusHistory = content.statusHistory || [];
     if (state.selectedInquiryId && !state.inquiries.some((inquiry) => inquiry.id === state.selectedInquiryId)) {
       state.selectedInquiryId = "";
@@ -479,6 +487,84 @@
         </article>
       `).join("") : '<p class="empty-state">No review submissions yet.</p>';
     }
+
+    renderNotifications();
+  }
+
+  function renderNotifications() {
+    const list = document.getElementById("admin-notifications");
+    if (!list) {
+      return;
+    }
+
+    const notifications = state.notifications
+      .filter((notification) => notification.audience === "admin")
+      .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))
+      .slice(0, 8);
+
+    list.innerHTML = notifications.length ? notifications.map((notification) => `
+      <article class="inquiry-card ${notification.readAt ? "" : "notification-unread"}">
+        <div>
+          <h3>${escapeHtml(notification.title)}</h3>
+          <p>${escapeHtml(notification.message)}</p>
+          <p>${escapeHtml(formatDateTime(notification.createdAt))}</p>
+        </div>
+        <div>
+          ${notification.link ? `<a href="${attr(notification.link)}">Open</a>` : ""}
+          <button type="button" data-read-notification="${attr(notification.id)}"${notification.readAt ? " disabled" : ""}>${notification.readAt ? "Read" : "Mark Read"}</button>
+        </div>
+      </article>
+    `).join("") : '<p class="empty-state">No notifications yet.</p>';
+  }
+
+  function renderSettings() {
+    setText("settings-public-contact-email", state.emailStatus.publicContactEmail || "-");
+    setText("settings-email-configured", state.emailStatus.configured ? "Configured" : "Not Configured");
+    setText("settings-email-mode", `Sending mode: ${state.emailStatus.mode || "log-only"}`);
+
+    const list = document.getElementById("settings-email-log");
+    if (list) {
+      const emails = state.emailLog.slice().sort((left, right) =>
+        String(right.createdAt || "").localeCompare(String(left.createdAt || ""))
+      ).slice(0, 10);
+      list.innerHTML = emails.length ? emails.map((email) => `
+        <article class="inquiry-card">
+          <div>
+            <h3>${escapeHtml(email.subject)}</h3>
+            <p>${escapeHtml(email.to)} - ${escapeHtml(email.template)} - ${escapeHtml(email.status)}</p>
+            <p>${escapeHtml(formatDateTime(email.createdAt))}</p>
+          </div>
+          <div>
+            <button type="button" data-copy-email="${attr(email.bodyText || "")}">Copy</button>
+          </div>
+        </article>
+      `).join("") : '<p class="empty-state">No email events have been recorded yet.</p>';
+    }
+  }
+
+  function renderAudit() {
+    const table = document.getElementById("audit-table");
+    if (!table) {
+      return;
+    }
+
+    const actionFilter = String(document.getElementById("audit-action-filter")?.value || "").toLowerCase();
+    const targetFilter = String(document.getElementById("audit-target-filter")?.value || "").toLowerCase();
+    const events = state.auditLog
+      .filter((event) => !actionFilter || String(event.action || "").toLowerCase().includes(actionFilter))
+      .filter((event) => !targetFilter || String(event.targetType || "").toLowerCase().includes(targetFilter))
+      .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))
+      .slice(0, 100);
+
+    table.innerHTML = events.length ? events.map((event) => `
+      <tr>
+        <td>${escapeHtml(formatDateTime(event.createdAt))}</td>
+        <td>${escapeHtml(event.actorType)}<br>${escapeHtml(event.actorId)}</td>
+        <td>${escapeHtml(event.action)}</td>
+        <td>${escapeHtml(event.targetType)}<br>${escapeHtml(event.targetId)}</td>
+        <td>${escapeHtml(event.summary)}</td>
+      </tr>
+    `).join("") : '<tr><td colspan="5">No audit events match these filters.</td></tr>';
   }
 
   function renderMediaOwnerSelect() {
@@ -938,6 +1024,8 @@
     renderInquiries();
     renderInvitations();
     renderReview();
+    renderSettings();
+    renderAudit();
   }
 
   function updateFromPayload(payload) {
@@ -1053,6 +1141,16 @@
     }
   }
 
+  async function markNotificationRead(id) {
+    const payload = await api(`/admin/api/notifications/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      body: "{}"
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Notification update failed.");
+  }
+
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const artistEdit = event.target.closest("[data-edit-artist]");
@@ -1068,6 +1166,8 @@
       const inquiryView = event.target.closest("[data-view-inquiry]");
       const inquiryArchive = event.target.closest("[data-archive-inquiry]");
       const reviewView = event.target.closest("[data-view-review]");
+      const notificationRead = event.target.closest("[data-read-notification]");
+      const copyEmail = event.target.closest("[data-copy-email]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -1108,6 +1208,12 @@
       if (reviewView) {
         renderReviewDetail(reviewView.dataset.viewReview);
       }
+      if (notificationRead) {
+        markNotificationRead(notificationRead.dataset.readNotification);
+      }
+      if (copyEmail) {
+        copyPath(copyEmail.dataset.copyEmail);
+      }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
       }
@@ -1122,6 +1228,7 @@
     document.addEventListener("change", (event) => {
       const mediaSelect = event.target.closest("[data-media-select]");
       const inquiryFilter = event.target.closest("#inquiry-status-filter, #inquiry-artist-filter");
+      const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
       if (mediaSelect?.value) {
         const input = document.querySelector(`[name="${mediaSelect.dataset.mediaSelect}"]`);
         if (input) {
@@ -1133,12 +1240,19 @@
         state.selectedInquiryId = "";
         renderInquiries();
       }
+      if (auditFilter) {
+        renderAudit();
+      }
     });
 
     document.addEventListener("input", (event) => {
       const imageInput = event.target.closest("[data-image-input]");
+      const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
       if (imageInput) {
         updateImagePreview(imageInput.dataset.imageInput, imageInput.value);
+      }
+      if (auditFilter) {
+        renderAudit();
       }
     });
 

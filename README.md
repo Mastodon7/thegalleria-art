@@ -46,6 +46,26 @@ For Coolify, the same persistent `/data` mount used for `DATA_DIR` should remain
 
 Phase 8 processes new uploads with Sharp. Original uploads are written only to `DATA_DIR/tmp-uploads` during processing, then removed. Ready media records contain WebP thumbnail, gallery, and large variants; failed or processing media should not be selectable for public fields.
 
+## Email, notifications, and recovery
+
+Phase 12 adds transactional email hooks, in-app notifications, and password recovery. Email is optional:
+
+- `RESEND_API_KEY`: enables live Resend transactional email.
+- `EMAIL_FROM`: verified sender address for live email.
+- `PUBLIC_CONTACT_EMAIL`: public contact/routing email shown in admin settings.
+- `PUBLIC_SITE_URL`: canonical site URL used in email links, defaults to `https://thegalleria.art`.
+- `PASSWORD_RESET_TOKEN_HOURS`: reset link lifetime, defaults to `2`.
+
+If email is not configured, messages are stored in the protected admin email log and printed server-side. Pages continue working in log-only mode.
+
+## Production hardening
+
+Phase 13 adds `/sitemap.xml`, `/robots.txt`, richer public metadata, admin-only exports, and `/admin/audit/`.
+
+- `ANALYTICS_PROVIDER=plausible` and `ANALYTICS_ID=thegalleria.art` can enable public-page analytics.
+- Admin exports are available from `/admin/settings/`.
+- Audit events are visible at `/admin/audit/`.
+
 ## Artist portal demo
 
 Phase 7 adds the first protected artist-facing demo portal at `/artist/login/`.

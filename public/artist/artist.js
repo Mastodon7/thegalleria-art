@@ -6,6 +6,7 @@
     artwork: [],
     media: [],
     inquiries: [],
+    notifications: [],
     statusHistory: [],
     selectedInquiryId: ""
   };
@@ -267,6 +268,7 @@
     state.artwork = content.artwork || [];
     state.media = content.media || [];
     state.inquiries = content.inquiries || [];
+    state.notifications = content.notifications || [];
     state.statusHistory = content.statusHistory || [];
     if (state.selectedInquiryId && !state.inquiries.some((inquiry) => inquiry.id === state.selectedInquiryId)) {
       state.selectedInquiryId = "";
@@ -385,6 +387,27 @@
           `).join("") : '<p class="empty-state">No records are waiting on review changes.</p>'}
         </div>
       `;
+    }
+
+    const notificationList = document.getElementById("artist-notifications");
+    if (notificationList) {
+      const notifications = state.notifications
+        .slice()
+        .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))
+        .slice(0, 8);
+      notificationList.innerHTML = notifications.length ? notifications.map((notification) => `
+        <article class="inquiry-card ${notification.readAt ? "" : "notification-unread"}">
+          <div>
+            <h3>${escapeHtml(notification.title)}</h3>
+            <p>${escapeHtml(notification.message)}</p>
+            <p>${escapeHtml(formatDateTime(notification.createdAt))}</p>
+          </div>
+          <div>
+            ${notification.link ? `<a href="${attr(notification.link)}">Open</a>` : ""}
+            <button type="button" data-artist-read-notification="${attr(notification.id)}"${notification.readAt ? " disabled" : ""}>${notification.readAt ? "Read" : "Mark Read"}</button>
+          </div>
+        </article>
+      `).join("") : '<p class="empty-state">No notifications yet.</p>';
     }
 
     const inquiryList = document.getElementById("artist-recent-inquiries");
@@ -777,12 +800,25 @@
     showMessage(payload.ok ? "success" : "error", payload.message || "Submit for review failed.");
   }
 
+  async function markNotificationRead(id) {
+    const payload = await api(`/artist/api/notifications/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      body: "{}"
+    });
+    if (payload.content) {
+      applyContent(payload.content);
+      renderAll();
+    }
+    showMessage(payload.ok ? "success" : "error", payload.message || "Notification update failed.");
+  }
+
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const galleryEdit = event.target.closest("[data-artist-edit-gallery]");
       const artworkEdit = event.target.closest("[data-artist-edit-artwork]");
       const inquiryView = event.target.closest("[data-artist-view-inquiry]");
       const reviewSubmit = event.target.closest("[data-submit-review-type]");
+      const notificationRead = event.target.closest("[data-artist-read-notification]");
 
       if (galleryEdit) {
         renderGalleryForm(state.galleries.find((gallery) => gallery.id === galleryEdit.dataset.artistEditGallery));
@@ -798,6 +834,10 @@
 
       if (reviewSubmit) {
         submitForReview(reviewSubmit.dataset.submitReviewType, reviewSubmit.dataset.submitReviewId);
+      }
+
+      if (notificationRead) {
+        markNotificationRead(notificationRead.dataset.artistReadNotification);
       }
     });
 
