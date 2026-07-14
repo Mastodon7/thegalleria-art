@@ -11,6 +11,13 @@
   <div class="admin-shell">
     <header class="admin-header">
       <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav" aria-label="Admin navigation">
+        <a aria-current="page" href="/admin/">Dashboard</a>
+        <a href="/admin/artists/">Artists</a>
+        <a href="/admin/galleries/">Galleries</a>
+        <a href="/admin/artwork/">Artwork</a>
+        <a href="/admin/settings/">Settings</a>
+      </nav>
       <form action="/admin/logout" method="post">
         <button class="admin-logout" type="submit">Logout</button>
       </form>
@@ -25,29 +32,54 @@
         </div>
       </div>
 
+      <section class="admin-stats" aria-label="Admin overview">
+        <article>
+          <span id="artist-count">1</span>
+          <p>Artists</p>
+        </article>
+        <article>
+          <span id="gallery-count">1</span>
+          <p>Galleries</p>
+        </article>
+        <article>
+          <span id="artwork-count">9</span>
+          <p>Artwork Records</p>
+        </article>
+        <article>
+          <span id="published-count">1</span>
+          <p>Published Artists</p>
+        </article>
+      </section>
+
       <section class="admin-grid" aria-label="Admin sections">
         <article>
           <p>Artists</p>
           <h2>Artist Profiles</h2>
           <span>Placeholder for future artist records and invitations.</span>
+          <a href="/admin/artists/">Open Artists</a>
         </article>
         <article>
           <p>Galleries</p>
           <h2>Gallery Pages</h2>
           <span>Placeholder for future gallery publishing controls.</span>
+          <a href="/admin/galleries/">Open Galleries</a>
         </article>
         <article>
-          <p>Public Pages</p>
-          <h2>Site Content</h2>
-          <span>Placeholder for future homepage and public page edits.</span>
+          <p>Artwork</p>
+          <h2>Artwork Records</h2>
+          <span>Placeholder for future artwork image and metadata controls.</span>
+          <a href="/admin/artwork/">Open Artwork</a>
         </article>
         <article>
           <p>Settings</p>
           <h2>Account Settings</h2>
           <span>Placeholder for password changes and owner preferences.</span>
+          <a href="/admin/settings/">Open Settings</a>
         </article>
       </section>
     </main>
   </div>
+  <script src="/gallery-data.js"></script>
+  <script src="/admin/admin.js"></script>
 </body>
 </html>

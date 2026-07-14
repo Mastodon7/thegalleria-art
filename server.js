@@ -131,18 +131,61 @@ function sendFile(response, filePath, statusCode = 200) {
   });
 }
 
-function sendAdminPage(response, session) {
-  const filePath = path.join(publicDir, "admin", "index.html");
-
-  fs.readFile(filePath, "utf8", (error, html) => {
+function sendAdminFile(response, filePath, session) {
+  fs.readFile(filePath, "utf8", (error, content) => {
     if (error) {
-      response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Server error");
+      response.writeHead(error.code === "ENOENT" ? 404 : 500, {
+        "Content-Type": "text/plain; charset=utf-8"
+      });
+      response.end(error.code === "ENOENT" ? "Not found" : "Server error");
       return;
     }
 
-    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    response.end(html.replaceAll("{{ADMIN_EMAIL}}", escapeHtml(session.email)));
+    response.writeHead(200, {
+      "Content-Type": mimeTypes[path.extname(filePath).toLowerCase()] || "text/plain; charset=utf-8"
+    });
+
+    if (path.extname(filePath).toLowerCase() === ".html") {
+      response.end(content.replaceAll("{{ADMIN_EMAIL}}", escapeHtml(session.email)));
+      return;
+    }
+
+    response.end(content);
+  });
+}
+
+function protectAdminRoute(request, response, pathname) {
+  const session = getSession(request);
+  if (!session) {
+    redirect(response, "/admin/login/", 302);
+    return;
+  }
+
+  let requestedPath;
+
+  try {
+    requestedPath = decodeURIComponent(pathname).replace(/^\/+/, "");
+  } catch (error) {
+    response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Bad request");
+    return;
+  }
+
+  const normalizedPath = path.normalize(requestedPath);
+  let absolutePath = path.join(publicDir, normalizedPath);
+
+  if (absolutePath !== publicDir && !absolutePath.startsWith(`${publicDir}${path.sep}`)) {
+    response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Forbidden");
+    return;
+  }
+
+  fs.stat(absolutePath, (error, stats) => {
+    if (!error && stats.isDirectory()) {
+      absolutePath = path.join(absolutePath, "index.html");
+    }
+
+    sendAdminFile(response, absolutePath, session);
   });
 }
 
@@ -252,14 +295,8 @@ function handleRequest(request, response) {
     return;
   }
 
-  if (pathname === "/admin/" || pathname === "/admin/index.html") {
-    const session = getSession(request);
-    if (!session) {
-      redirect(response, "/admin/login/", 302);
-      return;
-    }
-
-    sendAdminPage(response, session);
+  if (pathname.startsWith("/admin/") && !pathname.startsWith("/admin/login/")) {
+    protectAdminRoute(request, response, pathname);
     return;
   }
 

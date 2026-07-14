@@ -21,6 +21,17 @@ This phase adds a small Node server so admin authentication happens server-side 
 
 Without a backend/runtime, a static-only site cannot provide a truly private admin login. This foundation keeps storage simple with signed HTTP-only cookies and no database.
 
+## Admin management foundation
+
+Phase 4 adds protected admin management pages for artists, galleries, artwork, and settings:
+
+- `/admin/artists/`
+- `/admin/galleries/`
+- `/admin/artwork/`
+- `/admin/settings/`
+
+The shared public data model in `public/gallery-data.js` now includes artist, gallery, and artwork records. Public pages filter for published records only. Admin management forms are read-only placeholders in this phase; true create/edit/save behavior will require persistent server-side storage such as a small database or managed data store.
+
 ## Coolify
 
 1. Push this folder to a GitHub repository.

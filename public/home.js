@@ -1,17 +1,21 @@
 (function () {
   const data = window.GalleriaData || { artists: [] };
-  const artists = data.artists || [];
+  const artists = (data.artists || []).filter((artist) => artist.status === "published");
   const galleryList = document.getElementById("gallery-list");
   const featuredCard = document.getElementById("featured-gallery-card");
   const exploreButton = document.getElementById("explore-gallery");
   const searchInput = document.getElementById("gallery-search");
 
   function artistUrl(artist) {
-    return `/${artist.slug}/`;
+    return artist.canonicalPath || `/${artist.slug}/`;
+  }
+
+  function publishedGalleries(artist) {
+    return (artist.galleries || []).filter((gallery) => gallery.status === "published");
   }
 
   function galleryKeywords(artist) {
-    const galleryText = (artist.galleries || [])
+    const galleryText = publishedGalleries(artist)
       .map((gallery) => `${gallery.title} ${gallery.description}`)
       .join(" ");
     return [
@@ -47,7 +51,7 @@
   }
 
   function getFeaturedArtist() {
-    return artists.find((artist) => (artist.galleries || []).some((gallery) => gallery.featured)) || artists[0];
+    return artists.find((artist) => artist.featured && publishedGalleries(artist).some((gallery) => gallery.featured)) || artists[0];
   }
 
   function renderFeaturedGallery() {
@@ -58,7 +62,8 @@
       return;
     }
 
-    const gallery = (artist.galleries || []).find((item) => item.featured) || artist.galleries?.[0] || {};
+    const galleries = publishedGalleries(artist);
+    const gallery = galleries.find((item) => item.featured) || galleries[0] || {};
     featuredCard.innerHTML = `
       <img src="${gallery.coverImage || artist.heroImage}" alt="${artist.name} featured gallery image">
       <div class="featured-copy">
@@ -83,7 +88,7 @@
       return;
     }
 
-    const publishedArtists = artists.filter((artist) => artist.slug);
+    const publishedArtists = artists.filter((artist) => artist.slug && publishedGalleries(artist).length);
     const randomArtist = publishedArtists[Math.floor(Math.random() * publishedArtists.length)] || artists[0];
     window.location.href = artistUrl(randomArtist);
   });
