@@ -101,10 +101,11 @@ function redirect(response, location, statusCode = 303, headers = {}) {
   response.end();
 }
 
-function sendJson(response, statusCode, payload) {
+function sendJson(response, statusCode, payload, headers = {}) {
   response.writeHead(statusCode, secureHeaders({
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...headers
   }));
   response.end(JSON.stringify(payload));
 }
@@ -190,6 +191,18 @@ function createArtistSessionCookie(account, request) {
     email: account.email,
     artistId: account.artistId,
     role: "artist"
+  }, request);
+}
+
+function createSupportArtistSessionCookie(adminSession, artist, account, request, options = {}) {
+  return createSignedSessionCookie(artistSessionCookieName, {
+    email: account?.email || artist.contactEmail || adminSession.email,
+    artistId: artist.id,
+    role: "artist",
+    supportMode: true,
+    adminEmail: adminSession.email,
+    returnTo: cleanString(options.returnTo || "/admin/users/"),
+    supportNote: cleanLimitedString(options.note || "", 700)
   }, request);
 }
 
@@ -1531,6 +1544,24 @@ function sendAdminFile(response, filePath, session) {
   });
 }
 
+function supportBannerHtml(context) {
+  if (!context.support?.active) {
+    return "";
+  }
+
+  return `
+    <div class="support-banner" role="status">
+      <div>
+        <strong>Support mode</strong>
+        <span>Viewing as ${escapeHtml(context.artist.name)} (${escapeHtml(context.support.artistEmail || context.account.email)})</span>
+        <small>Admin: ${escapeHtml(context.support.adminEmail)}</small>
+      </div>
+      <form action="/artist/support/exit" method="post">
+        <button type="submit">Exit support mode</button>
+      </form>
+    </div>`;
+}
+
 function sendArtistFile(response, filePath, context) {
   fs.readFile(filePath, "utf8", (error, content) => {
     if (error) {
@@ -1547,6 +1578,7 @@ function sendArtistFile(response, filePath, context) {
 
     if (path.extname(filePath).toLowerCase() === ".html") {
       response.end(content
+        .replace('<div class="admin-shell">', `${supportBannerHtml(context)}\n  <div class="admin-shell">`)
         .replaceAll("{{ARTIST_EMAIL}}", escapeHtml(context.account.email))
         .replaceAll("{{ARTIST_NAME}}", escapeHtml(context.artist.name)));
       return;
@@ -4255,14 +4287,48 @@ function getArtistContext(request) {
   }
 
   const content = loadContent();
-  const account = content.artistAccounts.find((item) =>
+  let account = content.artistAccounts.find((item) =>
     item.artistId === session.artistId &&
     item.email === session.email &&
     item.status !== "archived"
   );
   const artist = content.artists.find((item) => item.id === session.artistId);
 
-  if (!account || !artist) {
+  if (!artist) {
+    return null;
+  }
+
+  if (session.supportMode) {
+    const adminSession = getSession(request);
+    if (!adminSession || adminSession.email !== session.adminEmail) {
+      return null;
+    }
+
+    account = account || {
+      id: `support-account-${artist.id}`,
+      artistId: artist.id,
+      email: session.email || artist.contactEmail || adminSession.email,
+      status: "support",
+      demo: Boolean(artist.demo),
+      createdAt: artist.createdAt,
+      updatedAt: artist.updatedAt
+    };
+
+    return {
+      account,
+      artist,
+      content,
+      support: {
+        active: true,
+        adminEmail: adminSession.email,
+        artistEmail: account.email,
+        returnTo: session.returnTo || "/admin/users/",
+        note: session.supportNote || ""
+      }
+    };
+  }
+
+  if (!account) {
     return null;
   }
 
@@ -4333,7 +4399,8 @@ function buildArtistPortalContent(context) {
     notifications: context.content.notifications
       .filter((notification) => notification.audience === "artist" && notification.artistId === context.artist.id)
       .map(notificationSafe),
-    statusHistory: context.content.statusHistory.filter((entry) => ownedIds.has(entry.recordId))
+    statusHistory: context.content.statusHistory.filter((entry) => ownedIds.has(entry.recordId)),
+    support: context.support || { active: false }
   };
 }
 
@@ -4721,6 +4788,21 @@ function handleArtistLogin(request, response) {
   });
 }
 
+function supportAuditActor(context) {
+  if (!context.support?.active) {
+    return null;
+  }
+
+  return {
+    actorType: "admin_support",
+    actorId: context.support.adminEmail,
+    metadata: {
+      artistEmail: context.support.artistEmail || context.account.email,
+      note: context.support.note || ""
+    }
+  };
+}
+
 function updateArtistProfile(context, input) {
   const content = context.content;
   const artist = content.artists.find((item) => item.id === context.artist.id);
@@ -4763,6 +4845,17 @@ function updateArtistProfile(context, input) {
     updatedAt: nowIso()
   });
 
+  const supportActor = supportAuditActor(context);
+  if (supportActor) {
+    addAuditEvent(content, {
+      ...supportActor,
+      action: "support.artist_profile.updated",
+      targetType: "artist",
+      targetId: artist.id,
+      summary: `Support updated profile for ${artist.name}`
+    });
+    trimOperationalLogs(content);
+  }
   saveContent(content, "artist-profile-save");
   return { ok: true, statusCode: 200, message: "Profile saved.", context: { ...context, artist, content } };
 }
@@ -4799,6 +4892,17 @@ function updateArtistGallery(context, id, input) {
     updatedAt: nowIso()
   });
 
+  const supportActor = supportAuditActor(context);
+  if (supportActor) {
+    addAuditEvent(content, {
+      ...supportActor,
+      action: "support.gallery.updated",
+      targetType: "gallery",
+      targetId: gallery.id,
+      summary: `Support updated gallery ${gallery.title}`
+    });
+    trimOperationalLogs(content);
+  }
   saveContent(content, "artist-gallery-save");
   return { ok: true, statusCode: 200, message: "Gallery saved.", context: { ...context, content } };
 }
@@ -4849,6 +4953,17 @@ function updateArtistArtwork(context, id, input) {
     updatedAt: nowIso()
   });
 
+  const supportActor = supportAuditActor(context);
+  if (supportActor) {
+    addAuditEvent(content, {
+      ...supportActor,
+      action: "support.artwork.updated",
+      targetType: "artwork",
+      targetId: artwork.id,
+      summary: `Support updated artwork ${artwork.title}`
+    });
+    trimOperationalLogs(content);
+  }
   saveContent(content, "artist-artwork-save");
   return { ok: true, statusCode: 200, message: "Artwork saved.", context: { ...context, content } };
 }
@@ -4993,6 +5108,80 @@ function requireAdminForApi(request, response) {
   return false;
 }
 
+function startSupportSession(request, response, artistId, adminSession, input = {}) {
+  const content = loadContent();
+  const artist = content.artists.find((item) => item.id === artistId && item.status !== "archived");
+
+  if (!artist) {
+    sendJson(response, 404, { ok: false, message: "Artist was not found." });
+    return;
+  }
+
+  const account = content.artistAccounts.find((item) =>
+    item.artistId === artist.id &&
+    item.status !== "archived"
+  ) || null;
+  const note = cleanLimitedString(input.note || "", 700);
+  const returnTo = cleanString(input.returnTo || input.sourcePage || "/admin/users/");
+
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: adminSession.email,
+    action: "support.access.started",
+    targetType: "artist",
+    targetId: artist.id,
+    summary: `Support access started for ${artist.name}`,
+    metadata: {
+      artistEmail: account?.email || artist.contactEmail || "",
+      sourcePage: cleanString(input.sourcePage || "/admin/users/"),
+      note
+    }
+  });
+  trimOperationalLogs(content);
+  saveContent(content, "support-access-started");
+
+  sendJson(response, 200, {
+    ok: true,
+    message: "Support mode started.",
+    redirectUrl: "/artist/",
+    content: publicSafeContent(content)
+  }, {
+    "Set-Cookie": createSupportArtistSessionCookie(adminSession, artist, account, request, { note, returnTo })
+  });
+}
+
+function exitSupportSession(request, response) {
+  const artistSession = getArtistSession(request);
+  const adminSession = getSession(request);
+
+  if (!artistSession?.supportMode || !adminSession || adminSession.email !== artistSession.adminEmail) {
+    redirect(response, "/artist/", 303);
+    return;
+  }
+
+  const content = loadContent();
+  const artist = content.artists.find((item) => item.id === artistSession.artistId);
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: adminSession.email,
+    action: "support.access.ended",
+    targetType: "artist",
+    targetId: artistSession.artistId || "",
+    summary: `Support access ended${artist ? ` for ${artist.name}` : ""}`,
+    metadata: {
+      artistEmail: artistSession.email || artist?.contactEmail || "",
+      sourcePage: artistSession.returnTo || "/admin/users/",
+      note: artistSession.supportNote || ""
+    }
+  });
+  trimOperationalLogs(content);
+  saveContent(content, "support-access-ended");
+
+  redirect(response, artistSession.returnTo || "/admin/users/", 303, {
+    "Set-Cookie": clearSessionCookie(artistSessionCookieName)
+  });
+}
+
 function handleAdminApi(request, response, pathname) {
   if (!requireAdminForApi(request, response)) {
     return;
@@ -5040,6 +5229,14 @@ function handleAdminApi(request, response, pathname) {
 
   if (request.method === "POST" && pathname === "/admin/api/media/upload") {
     handleMediaUpload(request, response, { uploadedBy: "admin" });
+    return;
+  }
+
+  const supportStartMatch = pathname.match(/^\/admin\/api\/support\/artist\/([^/]+)\/start$/);
+  if (request.method === "POST" && supportStartMatch) {
+    collectJson(request, response, (input) => {
+      startSupportSession(request, response, decodeURIComponent(supportStartMatch[1]), adminSession, input);
+    });
     return;
   }
 
@@ -5321,6 +5518,11 @@ function handleRequest(request, response) {
 
   if (request.method === "POST" && pathname === "/artist/login") {
     handleArtistLogin(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/artist/support/exit") {
+    exitSupportSession(request, response);
     return;
   }
 

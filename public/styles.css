@@ -1067,6 +1067,7 @@ a {
   text-transform: uppercase;
 }
 
+.inquiry-filter-grid input,
 .inquiry-filter-grid select {
   width: 100%;
   min-height: 48px;
@@ -1075,6 +1076,68 @@ a {
   color: #f8f1e6;
   padding: 11px 14px;
   color-scheme: dark;
+}
+
+.users-table {
+  min-width: 1120px;
+}
+
+.user-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.support-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px clamp(18px, 4vw, 56px);
+  border-bottom: 1px solid rgba(216, 189, 116, .58);
+  background: rgba(11, 10, 8, .98);
+  color: #f8f1e6;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
+}
+
+.support-banner div {
+  display: grid;
+  gap: 3px;
+}
+
+.support-banner strong {
+  color: #d8bd74;
+  font-size: .72rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.support-banner span,
+.support-banner small {
+  color: #d7ccb9;
+  line-height: 1.35;
+}
+
+.support-banner button {
+  min-height: 38px;
+  white-space: nowrap;
+  padding: 0 14px;
+  border: 1px solid rgba(216, 189, 116, .58);
+  background: transparent;
+  color: #f8f1e6;
+  cursor: pointer;
+  font-size: .7rem;
+  text-transform: uppercase;
+}
+
+.support-banner button:hover,
+.support-banner button:focus-visible {
+  background: #b9974d;
+  color: #0b0a08;
 }
 
 .inquiry-card-list {
@@ -2480,6 +2543,11 @@ a {
 
   .admin-stats {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .support-banner {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .admin-upload-form,

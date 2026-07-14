@@ -24,7 +24,8 @@
     artistBilling: [],
     statusHistory: [],
     selectedInquiryId: "",
-    selectedReviewId: ""
+    selectedReviewId: "",
+    selectedUserArtistId: ""
   };
 
   function escapeHtml(value) {
@@ -73,6 +74,10 @@
 
   function publicArtistUrl(artist) {
     return artist?.canonicalPath || `/${artist?.slug || ""}/`;
+  }
+
+  function previewArtistUrl(artist) {
+    return artist?.id ? `/admin/preview/artist/${encodeURIComponent(artist.id)}/` : "";
   }
 
   function formatDate(value) {
@@ -219,6 +224,121 @@
 
   function reviewItemById(id) {
     return reviewItems().find((item) => `${item.type}:${item.record.id}` === id);
+  }
+
+  function userDirectoryRows() {
+    const rows = state.artists.map((artist) => {
+      const account = accountByArtistId(artist.id);
+      const billing = billingForArtist(artist.id);
+      return {
+        id: artist.id,
+        artist,
+        account,
+        billing,
+        email: account?.email || artist.contactEmail || "",
+        name: artist.name || "",
+        accountStatus: account?.status || "no_account",
+        artistStatus: artist.status || "draft",
+        billingStatus: artist.billingStatus || billing.status || "not_configured",
+        plan: billing.plan || planById(artist.planId),
+        invitation: invitationByArtistId(artist.id)
+      };
+    });
+
+    state.artistAccounts
+      .filter((account) => !state.artists.some((artist) => artist.id === account.artistId))
+      .forEach((account) => {
+        rows.push({
+          id: account.id,
+          artist: null,
+          account,
+          billing: {},
+          email: account.email || "",
+          name: "Unlinked account",
+          accountStatus: account.status || "active",
+          artistStatus: "unlinked",
+          billingStatus: "not_configured",
+          plan: null,
+          invitation: null
+        });
+      });
+
+    return rows.sort((left, right) => String(left.name || left.email).localeCompare(String(right.name || right.email)));
+  }
+
+  function renderUserFilters() {
+    const accountFilter = document.getElementById("users-account-filter");
+    const planFilter = document.getElementById("users-plan-filter");
+    const billingFilter = document.getElementById("users-billing-filter");
+    const rows = userDirectoryRows();
+
+    if (accountFilter) {
+      const selected = accountFilter.value;
+      const statuses = [...new Set(rows.map((row) => row.accountStatus).filter(Boolean))].sort();
+      accountFilter.innerHTML = `
+        <option value="">All accounts</option>
+        ${statuses.map((status) => `<option value="${attr(status)}"${status === selected ? " selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+      `;
+    }
+
+    if (planFilter) {
+      const selected = planFilter.value;
+      planFilter.innerHTML = `
+        <option value="">All plans</option>
+        ${state.plans.map((plan) => `<option value="${attr(plan.id)}"${plan.id === selected ? " selected" : ""}>${escapeHtml(plan.name)}</option>`).join("")}
+        <option value="none"${selected === "none" ? " selected" : ""}>No plan</option>
+      `;
+    }
+
+    if (billingFilter) {
+      const selected = billingFilter.value;
+      const statuses = [...new Set(rows.map((row) => row.billingStatus).filter(Boolean))].sort();
+      billingFilter.innerHTML = `
+        <option value="">All billing states</option>
+        ${statuses.map((status) => `<option value="${attr(status)}"${status === selected ? " selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+      `;
+    }
+  }
+
+  function filteredUserRows() {
+    const search = String(document.getElementById("users-search")?.value || "").trim().toLowerCase();
+    const accountStatus = document.getElementById("users-account-filter")?.value || "";
+    const planId = document.getElementById("users-plan-filter")?.value || "";
+    const billingStatus = document.getElementById("users-billing-filter")?.value || "";
+
+    return userDirectoryRows().filter((row) => {
+      const haystack = [
+        row.email,
+        row.name,
+        row.artist?.slug,
+        row.artist?.professionalTitle,
+        row.artist?.city,
+        row.account?.id
+      ].filter(Boolean).join(" ").toLowerCase();
+      return (!search || haystack.includes(search)) &&
+        (!accountStatus || row.accountStatus === accountStatus) &&
+        (!billingStatus || row.billingStatus === billingStatus) &&
+        (!planId || (planId === "none" ? !row.plan?.id : row.plan?.id === planId));
+    });
+  }
+
+  function publicLinkHtml(artist) {
+    if (!artist) {
+      return '<span class="admin-muted">No artist record</span>';
+    }
+
+    if (artist.status === "published") {
+      return `<a href="${attr(publicArtistUrl(artist))}" target="_blank" rel="noopener">View Public Page</a>`;
+    }
+
+    return `<a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview</a>`;
+  }
+
+  function recentForArtist(items, artistId, predicate) {
+    return items
+      .filter((item) => predicate(item, artistId))
+      .sort((left, right) => String(right.createdAt || right.updatedAt || "").localeCompare(String(left.createdAt || left.updatedAt || "")))
+      .slice(0, 5);
   }
 
   function statusHistoryFor(type, id) {
@@ -542,6 +662,120 @@
         </div>
       </article>
     `).join("") : '<p class="empty-state">No notifications yet.</p>';
+  }
+
+  function renderUsers() {
+    const table = document.getElementById("users-table");
+    if (!table) {
+      return;
+    }
+
+    renderUserFilters();
+    const rows = filteredUserRows();
+    if (!state.selectedUserArtistId && rows[0]?.artist?.id) {
+      state.selectedUserArtistId = rows[0].artist.id;
+    }
+
+    table.innerHTML = rows.length ? rows.map((row) => {
+      const invitationStatus = row.invitation?.status || row.artist?.invitationStatus || "none";
+      const lastLogin = row.account?.lastLoginAt || row.account?.acceptedAt || row.invitation?.acceptedAt || "";
+      const createdAt = row.account?.createdAt || row.artist?.createdAt || "";
+      return `
+        <tr>
+          <td>${escapeHtml(row.email || "No account email")}<br>${row.account?.demo || row.artist?.demo ? '<span class="admin-badge">Demo</span>' : ""}</td>
+          <td>${escapeHtml(row.name)}<br><span class="admin-muted">${escapeHtml(row.artist?.slug || "No slug")}</span></td>
+          <td>${badge(row.accountStatus)}<br>${badge(row.artistStatus)}</td>
+          <td>${escapeHtml(row.plan?.name || "No plan")}<br>${badge(row.billingStatus)}</td>
+          <td>${badge(invitationStatus)}</td>
+          <td>Last login: ${escapeHtml(formatDateTime(lastLogin) || "Never")}<br>Created: ${escapeHtml(formatDate(createdAt) || "-")}</td>
+          <td>${publicLinkHtml(row.artist)}</td>
+          <td class="admin-actions">
+            <button type="button" data-view-user="${attr(row.artist?.id || "")}"${row.artist ? "" : " disabled"}>Details</button>
+            <button type="button" data-support-artist="${attr(row.artist?.id || "")}"${row.artist ? "" : " disabled"}>Enter Artist Portal</button>
+          </td>
+        </tr>
+      `;
+    }).join("") : '<tr><td colspan="8">No users match these filters.</td></tr>';
+
+    renderUserDetail(state.selectedUserArtistId || rows[0]?.artist?.id || "");
+  }
+
+  function renderUserDetail(artistId) {
+    const panel = document.getElementById("user-detail-panel");
+    if (!panel) {
+      return;
+    }
+
+    const row = userDirectoryRows().find((item) => item.artist?.id === artistId) || filteredUserRows().find((item) => item.artist);
+    if (!row?.artist) {
+      panel.innerHTML = '<p class="empty-state">Select an artist account to view details.</p>';
+      return;
+    }
+
+    state.selectedUserArtistId = row.artist.id;
+    const usage = row.billing.usage || {};
+    const evaluation = row.billing.usageEvaluation || {};
+    const recentInquiries = recentForArtist(state.inquiries, row.artist.id, (inquiry, id) => inquiry.artistId === id || inquiry.assignedArtistId === id);
+    const recentMedia = recentForArtist(state.media, row.artist.id, (media, id) => media.ownerArtistId === id);
+    const recentAudit = recentForArtist(state.auditLog, row.artist.id, (event, id) => event.targetId === id || (String(event.action || "").includes("support") && event.targetId === id));
+    const invitationStatus = row.invitation?.status || row.artist.invitationStatus || "none";
+
+    panel.innerHTML = `
+      <div class="user-detail-grid">
+        <article class="inquiry-detail-card">
+          <p class="section-kicker">Artist</p>
+          <h3>${escapeHtml(row.artist.name)}</h3>
+          <p>${escapeHtml(row.artist.professionalTitle || "Artist")}</p>
+          <p>${escapeHtml(row.email || row.artist.contactEmail || "No account email")}</p>
+          <p>${badge(row.artistStatus)} ${badge(row.accountStatus)}</p>
+        </article>
+        <article class="inquiry-detail-card">
+          <p class="section-kicker">Plan</p>
+          <h3>${escapeHtml(row.plan?.name || "No plan")}</h3>
+          <p>${badge(row.billingStatus)} ${badge(row.artist.subscriptionStatus || "not_configured")}</p>
+          <p>${escapeHtml(formatDate(row.artist.trialEndAt) ? `Trial ends ${formatDate(row.artist.trialEndAt)}` : "No trial end date")}</p>
+        </article>
+        <article class="inquiry-detail-card">
+          <p class="section-kicker">Usage</p>
+          <h3>${Number(usage.galleries || 0)} galleries</h3>
+          <p>${Number(usage.artwork || 0)} artwork records</p>
+          <p>${Number(usage.media || 0)} media files / ${Number(usage.storageMb || 0)} MB</p>
+          ${evaluation.warnings?.length ? `<p>${escapeHtml(evaluation.warnings.join(" "))}</p>` : ""}
+        </article>
+        <article class="inquiry-detail-card">
+          <p class="section-kicker">Access</p>
+          <h3>${escapeHtml(invitationStatus)}</h3>
+          <p>Last login: ${escapeHtml(formatDateTime(row.account?.lastLoginAt) || "Never")}</p>
+          <p>Created: ${escapeHtml(formatDate(row.account?.createdAt || row.artist.createdAt) || "-")}</p>
+        </article>
+      </div>
+
+      <div class="admin-actions">
+        ${publicLinkHtml(row.artist)}
+        <button type="button" data-support-artist="${attr(row.artist.id)}">Enter Artist Portal</button>
+      </div>
+
+      <div class="inquiry-detail-grid">
+        <div class="inquiry-message-block">
+          <p class="section-kicker">Recent Inquiries</p>
+          ${recentInquiries.length ? recentInquiries.map((inquiry) => `
+            <p><strong>${escapeHtml(inquiry.visitorName || "Visitor")}</strong><br>${escapeHtml(messagePreview(inquiry.message, 90))}<br>${escapeHtml(formatDateTime(inquiry.createdAt))}</p>
+          `).join("") : '<p class="empty-state">No recent inquiries.</p>'}
+        </div>
+        <div class="inquiry-message-block">
+          <p class="section-kicker">Recent Media</p>
+          ${recentMedia.length ? recentMedia.map((media) => `
+            <p><strong>${escapeHtml(media.originalFilename || media.publicPath)}</strong><br>${escapeHtml(mediaPath(media, "gallery") || media.publicPath)}<br>${escapeHtml(formatDateTime(media.createdAt || media.uploadedAt))}</p>
+          `).join("") : '<p class="empty-state">No recent media.</p>'}
+        </div>
+        <div class="inquiry-message-block">
+          <p class="section-kicker">Recent Audit / Support</p>
+          ${recentAudit.length ? recentAudit.map((event) => `
+            <p><strong>${escapeHtml(event.action)}</strong><br>${escapeHtml(event.summary || "")}<br>${escapeHtml(formatDateTime(event.createdAt))}</p>
+          `).join("") : '<p class="empty-state">No recent support events.</p>'}
+        </div>
+      </div>
+    `;
   }
 
   function renderSettings() {
@@ -1202,6 +1436,7 @@
 
   function renderAll() {
     renderDashboard();
+    renderUsers();
     renderMediaOwnerSelect();
     renderPlans();
     renderArtists();
@@ -1349,6 +1584,29 @@
     showMessage(payload.ok ? "success" : "error", payload.message || "Notification update failed.");
   }
 
+  async function startSupport(artistId) {
+    if (!artistId) {
+      return;
+    }
+
+    const note = window.prompt("Optional support note", "") || "";
+    const payload = await api(`/admin/api/support/artist/${encodeURIComponent(artistId)}/start`, {
+      method: "POST",
+      body: JSON.stringify({
+        note,
+        sourcePage: "/admin/users/",
+        returnTo: "/admin/users/"
+      })
+    });
+
+    if (payload.ok && payload.redirectUrl) {
+      window.location.href = payload.redirectUrl;
+      return;
+    }
+
+    showMessage("error", payload.message || "Support mode could not be started.");
+  }
+
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const artistEdit = event.target.closest("[data-edit-artist]");
@@ -1368,6 +1626,8 @@
       const copyEmail = event.target.closest("[data-copy-email]");
       const planEdit = event.target.closest("[data-edit-plan]");
       const copyStripeWebhook = event.target.closest("#copy-stripe-webhook-endpoint");
+      const userView = event.target.closest("[data-view-user]");
+      const supportArtist = event.target.closest("[data-support-artist]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -1420,6 +1680,12 @@
       if (planEdit) {
         renderPlanForm(state.plans.find((plan) => plan.id === planEdit.dataset.editPlan) || {});
       }
+      if (userView) {
+        renderUserDetail(userView.dataset.viewUser);
+      }
+      if (supportArtist) {
+        startSupport(supportArtist.dataset.supportArtist);
+      }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
       }
@@ -1438,6 +1704,7 @@
       const mediaSelect = event.target.closest("[data-media-select]");
       const inquiryFilter = event.target.closest("#inquiry-status-filter, #inquiry-artist-filter");
       const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
+      const userFilter = event.target.closest("#users-account-filter, #users-plan-filter, #users-billing-filter");
       if (mediaSelect?.value) {
         const input = document.querySelector(`[name="${mediaSelect.dataset.mediaSelect}"]`);
         if (input) {
@@ -1452,16 +1719,25 @@
       if (auditFilter) {
         renderAudit();
       }
+      if (userFilter) {
+        state.selectedUserArtistId = "";
+        renderUsers();
+      }
     });
 
     document.addEventListener("input", (event) => {
       const imageInput = event.target.closest("[data-image-input]");
       const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
+      const userSearch = event.target.closest("#users-search");
       if (imageInput) {
         updateImagePreview(imageInput.dataset.imageInput, imageInput.value);
       }
       if (auditFilter) {
         renderAudit();
+      }
+      if (userSearch) {
+        state.selectedUserArtistId = "";
+        renderUsers();
       }
     });
 
