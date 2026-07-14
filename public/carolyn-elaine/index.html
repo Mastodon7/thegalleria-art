@@ -161,6 +161,47 @@
         <p><a href="https://studioelainemosaic.com">studioelainemosaic.com</a><br>
         <a href="mailto:carolyn@studioelainemosaic.com">carolyn@studioelainemosaic.com</a></p>
         <a class="button" href="mailto:carolyn@studioelainemosaic.com?subject=Artwork%20Inquiry">Ask About the Artwork</a>
+        <form class="inquiry-form carolyn-inquiry-form" data-inquiry-form>
+          <input name="inquiryType" type="hidden" value="artist">
+          <input name="artistId" type="hidden" value="artist-carolyn-elaine">
+          <input name="galleryId" type="hidden" value="gallery-carolyn-portfolio">
+          <input name="sourceUrl" type="hidden" value="/carolyn-elaine/">
+          <label>
+            <span>Name</span>
+            <input name="name" autocomplete="name" required>
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" required>
+          </label>
+          <label>
+            <span>Phone Optional</span>
+            <input name="phone" autocomplete="tel">
+          </label>
+          <label>
+            <span>Artwork Optional</span>
+            <select name="artworkId" data-inquiry-artwork-select>
+              <option value="">General inquiry about Carolyn Elaine</option>
+              <option value="artwork-whispers-main">Whispers of Ancestral Wisdom</option>
+              <option value="artwork-tears">The Tears of Our Ancestors Irrigate Our Destiny</option>
+              <option value="artwork-light">We Carry the Light</option>
+              <option value="artwork-narrative">Creating Our Own Narrative</option>
+              <option value="artwork-bjs-mom">BJ's Mom</option>
+              <option value="artwork-brookfield-1">Brookfield Zoo Chicago</option>
+              <option value="artwork-gathered">Where Two or Three Are Gathered</option>
+            </select>
+          </label>
+          <label class="admin-field-wide">
+            <span>Message</span>
+            <textarea name="message" maxlength="3000" required></textarea>
+          </label>
+          <label class="inquiry-honeypot" aria-hidden="true">
+            <span>Website</span>
+            <input name="companyWebsite" tabindex="-1" autocomplete="off">
+          </label>
+          <button class="view-artwork-button" type="submit">Send Inquiry</button>
+          <p class="inquiry-feedback" data-inquiry-feedback aria-live="polite"></p>
+        </form>
       </div>
     </section>
   </main>
@@ -191,5 +232,6 @@
   </div>
 
   <script src="/script.js"></script>
+  <script src="/inquiry.js"></script>
 </body>
 </html>

@@ -17,6 +17,7 @@
         <a href="/artist/galleries/">Galleries</a>
         <a href="/artist/artwork/">Artwork</a>
         <a href="/artist/media/">Media</a>
+        <a href="/artist/inquiries/">Inquiries</a>
         <a id="artist-public-view" href="/">Public View</a>
       </nav>
       <form action="/artist/logout" method="post">
@@ -55,6 +56,15 @@
           <span id="artist-invitation-status">-</span>
           <p>Invitation</p>
         </article>
+        <article>
+          <span id="artist-new-inquiry-count">0</span>
+          <p>New Inquiries</p>
+        </article>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Recent Inquiries</h2>
+        <div class="inquiry-card-list" id="artist-recent-inquiries"></div>
       </section>
 
       <section class="admin-panel">

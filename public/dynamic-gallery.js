@@ -3,6 +3,7 @@
   const image = document.getElementById("dynamic-lightbox-image");
   const title = document.getElementById("dynamic-lightbox-title");
   const meta = document.getElementById("dynamic-lightbox-meta");
+  const inquire = document.getElementById("dynamic-lightbox-inquire");
   const close = document.querySelector(".dynamic-lightbox-close");
   const prev = document.querySelector(".dynamic-lightbox-prev");
   const next = document.querySelector(".dynamic-lightbox-next");
@@ -15,6 +16,9 @@
     image.alt = trigger.dataset.title || "Artwork";
     title.textContent = trigger.dataset.title || "";
     meta.textContent = trigger.dataset.meta || "";
+    if (inquire) {
+      inquire.dataset.inquirySelect = trigger.dataset.artworkId || "";
+    }
   }
 
   function open(index) {
@@ -45,6 +49,13 @@
   close?.addEventListener("click", closeLightbox);
   prev?.addEventListener("click", () => move(-1));
   next?.addEventListener("click", () => move(1));
+  inquire?.addEventListener("click", () => {
+    const artworkId = inquire.dataset.inquirySelect || "";
+    closeLightbox();
+    document.dispatchEvent(new CustomEvent("galleria:selectInquiryArtwork", {
+      detail: { artworkId }
+    }));
+  });
   lightbox?.addEventListener("click", (event) => {
     if (!event.target.closest("figure, button")) {
       closeLightbox();

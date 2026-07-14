@@ -17,6 +17,7 @@
         <a href="/admin/galleries/">Galleries</a>
         <a href="/admin/artwork/">Artwork</a>
         <a href="/admin/media/">Media</a>
+        <a href="/admin/inquiries/">Inquiries</a>
         <a href="/admin/settings/">Settings</a>
       </nav>
       <form action="/admin/logout" method="post">
@@ -51,6 +52,14 @@
           <p>Media Images</p>
         </article>
         <article>
+          <span id="new-inquiry-count">0</span>
+          <p>New Inquiries</p>
+        </article>
+        <article>
+          <span id="inquiry-count">0</span>
+          <p>Total Inquiries</p>
+        </article>
+        <article>
           <span id="published-count">1</span>
           <p>Published Artists</p>
         </article>
@@ -82,11 +91,22 @@
           <a href="/admin/media/">Open Media</a>
         </article>
         <article>
+          <p>Inquiries</p>
+          <h2>Collector Messages</h2>
+          <span>Review and route collector inquiries about artists, galleries, and artwork.</span>
+          <a href="/admin/inquiries/">Open Inquiries</a>
+        </article>
+        <article>
           <p>Settings</p>
           <h2>Account Settings</h2>
           <span>Placeholder for password changes and owner preferences.</span>
           <a href="/admin/settings/">Open Settings</a>
         </article>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Recent Inquiries</h2>
+        <div class="inquiry-card-list" id="admin-recent-inquiries"></div>
       </section>
     </main>
   </div>

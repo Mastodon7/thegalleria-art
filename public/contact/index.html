@@ -28,6 +28,41 @@
       <p>If you are interested in a future invitation, include your name, city, medium, website or portfolio link, and a short note about the work you would like to present.</p>
       <h2>Collectors</h2>
       <p>For questions about a featured artist or artwork, include the artist name and the work you are asking about so the inquiry can be routed clearly.</p>
+
+      <form class="inquiry-form contact-inquiry-form" data-inquiry-form>
+        <input name="inquiryType" type="hidden" value="general">
+        <input name="sourceUrl" type="hidden" value="/contact/">
+        <label>
+          <span>Name</span>
+          <input name="name" autocomplete="name" required>
+        </label>
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" autocomplete="email" required>
+        </label>
+        <label>
+          <span>Phone Optional</span>
+          <input name="phone" autocomplete="tel">
+        </label>
+        <label>
+          <span>Preferred Contact</span>
+          <select name="preferredContactMethod">
+            <option value="email">Email</option>
+            <option value="phone">Phone</option>
+            <option value="either">Either</option>
+          </select>
+        </label>
+        <label class="admin-field-wide">
+          <span>Message</span>
+          <textarea name="message" maxlength="3000" required></textarea>
+        </label>
+        <label class="inquiry-honeypot" aria-hidden="true">
+          <span>Website</span>
+          <input name="companyWebsite" tabindex="-1" autocomplete="off">
+        </label>
+        <button class="home-button" type="submit">Send Inquiry</button>
+        <p class="inquiry-feedback" data-inquiry-feedback aria-live="polite"></p>
+      </form>
     </main>
 
     <footer class="site-footer">
@@ -41,5 +76,6 @@
       <p>&copy; 2026 The Galleria.Art. All rights reserved.</p>
     </footer>
   </div>
+  <script src="/inquiry.js"></script>
 </body>
 </html>

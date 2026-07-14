@@ -1,11 +1,14 @@
 (function () {
   const statusOptions = ["draft", "published", "archived"];
   const invitationOptions = ["current", "invited", "pending", "accepted", "none"];
+  const inquiryStatusOptions = ["new", "reviewed", "replied", "archived", "spam"];
   const state = {
     artists: [],
     galleries: [],
     artwork: [],
-    media: []
+    media: [],
+    inquiries: [],
+    selectedInquiryId: ""
   };
 
   function escapeHtml(value) {
@@ -68,6 +71,25 @@
     });
   }
 
+  function formatDateTime(value) {
+    if (!value) {
+      return "";
+    }
+
+    return new Date(value).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function messagePreview(value, length = 120) {
+    const message = String(value || "").replace(/\s+/g, " ").trim();
+    return message.length > length ? `${message.slice(0, length - 1)}...` : message;
+  }
+
   function formatBytes(value) {
     const bytes = Number(value || 0);
 
@@ -88,6 +110,40 @@
 
   function galleryById(id) {
     return state.galleries.find((gallery) => gallery.id === id);
+  }
+
+  function artworkById(id) {
+    return state.artwork.find((artwork) => artwork.id === id);
+  }
+
+  function sortedInquiries() {
+    return state.inquiries.slice().sort((left, right) =>
+      String(right.createdAt || "").localeCompare(String(left.createdAt || ""))
+    );
+  }
+
+  function inquiryRelated(inquiry) {
+    const artist = artistById(inquiry.artistId || inquiry.assignedArtistId);
+    const gallery = galleryById(inquiry.galleryId);
+    const artwork = artworkById(inquiry.artworkId);
+    return {
+      artist: artist?.name || "",
+      gallery: gallery?.title || "",
+      artwork: artwork?.title || ""
+    };
+  }
+
+  function inquiryRelatedHtml(inquiry) {
+    const related = inquiryRelated(inquiry);
+    const parts = [related.artist, related.gallery, related.artwork].filter(Boolean);
+    return parts.length ? parts.map(escapeHtml).join("<br>") : "General inquiry";
+  }
+
+  function mailtoForInquiry(inquiry) {
+    const related = inquiryRelated(inquiry);
+    const subject = encodeURIComponent(["The Galleria.Art Inquiry", related.artist, related.artwork || related.gallery].filter(Boolean).join(" - "));
+    const body = encodeURIComponent(`Hello ${inquiry.visitorName || ""},\n\nThank you for your inquiry about ${[related.artist, related.artwork || related.gallery].filter(Boolean).join(" / ") || "The Galleria.Art"}.\n\n`);
+    return `mailto:${encodeURIComponent(inquiry.visitorEmail)}?subject=${subject}&body=${body}`;
   }
 
   function setText(id, value) {
@@ -212,6 +268,10 @@
     state.galleries = content.galleries || [];
     state.artwork = content.artwork || [];
     state.media = content.media || [];
+    state.inquiries = content.inquiries || [];
+    if (state.selectedInquiryId && !state.inquiries.some((inquiry) => inquiry.id === state.selectedInquiryId)) {
+      state.selectedInquiryId = "";
+    }
   }
 
   async function loadContent() {
@@ -314,7 +374,27 @@
     setText("gallery-count", state.galleries.length);
     setText("artwork-count", state.artwork.length);
     setText("media-count", activeMedia().length);
+    setText("new-inquiry-count", state.inquiries.filter((inquiry) => inquiry.status === "new").length);
+    setText("inquiry-count", state.inquiries.length);
     setText("published-count", state.artists.filter((artist) => artist.status === "published").length);
+
+    const recentList = document.getElementById("admin-recent-inquiries");
+    if (recentList) {
+      const recent = sortedInquiries().slice(0, 5);
+      recentList.innerHTML = recent.length ? recent.map((inquiry) => `
+        <article class="inquiry-card">
+          <div>
+            <h3>${escapeHtml(inquiry.visitorName)}</h3>
+            <p>${inquiryRelatedHtml(inquiry)}</p>
+            <p>${escapeHtml(messagePreview(inquiry.message, 110))}</p>
+          </div>
+          <div>
+            ${badge(inquiry.status || "new")}
+            <a href="/admin/inquiries/">Open</a>
+          </div>
+        </article>
+      `).join("") : '<p class="empty-state">No inquiries have been received yet.</p>';
+    }
   }
 
   function renderMediaOwnerSelect() {
@@ -529,6 +609,115 @@
     `).join("");
   }
 
+  function renderInquiryFilters() {
+    const statusFilter = document.getElementById("inquiry-status-filter");
+    const artistFilter = document.getElementById("inquiry-artist-filter");
+
+    if (statusFilter) {
+      const selected = statusFilter.value;
+      statusFilter.innerHTML = `
+        <option value="">All statuses</option>
+        ${inquiryStatusOptions.map((status) => `<option value="${attr(status)}"${status === selected ? " selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+      `;
+    }
+
+    if (artistFilter) {
+      const selected = artistFilter.value;
+      artistFilter.innerHTML = `
+        <option value="">All artists</option>
+        ${state.artists.map((artist) => `<option value="${attr(artist.id)}"${artist.id === selected ? " selected" : ""}>${escapeHtml(artist.name)}</option>`).join("")}
+      `;
+    }
+  }
+
+  function filteredInquiries() {
+    const status = document.getElementById("inquiry-status-filter")?.value || "";
+    const artistId = document.getElementById("inquiry-artist-filter")?.value || "";
+    return sortedInquiries().filter((inquiry) =>
+      (!status || inquiry.status === status) &&
+      (!artistId || inquiry.artistId === artistId || inquiry.assignedArtistId === artistId)
+    );
+  }
+
+  function renderInquiries() {
+    renderInquiryFilters();
+
+    const table = document.getElementById("inquiries-table");
+    if (!table) {
+      return;
+    }
+
+    const inquiries = filteredInquiries();
+    if (!state.selectedInquiryId && inquiries[0]) {
+      state.selectedInquiryId = inquiries[0].id;
+    }
+
+    table.innerHTML = inquiries.length ? inquiries.map((inquiry) => `
+      <tr>
+        <td>${escapeHtml(inquiry.visitorName)}<br><a href="mailto:${attr(inquiry.visitorEmail)}">${escapeHtml(inquiry.visitorEmail)}</a></td>
+        <td>${inquiryRelatedHtml(inquiry)}</td>
+        <td>${badge(inquiry.status || "new")}</td>
+        <td>${escapeHtml(formatDate(inquiry.createdAt))}</td>
+        <td>${inquiry.sourceUrl ? `<a href="${attr(inquiry.sourceUrl)}">${escapeHtml(inquiry.sourceUrl)}</a>` : ""}</td>
+        <td>${escapeHtml(messagePreview(inquiry.message))}</td>
+        <td class="admin-actions">
+          <button type="button" data-view-inquiry="${attr(inquiry.id)}">View</button>
+          <a href="${mailtoForInquiry(inquiry)}">Reply</a>
+          <button type="button" data-archive-inquiry="${attr(inquiry.id)}"${inquiry.status === "archived" ? " disabled" : ""}>Archive</button>
+        </td>
+      </tr>
+    `).join("") : '<tr><td colspan="7">No inquiries match these filters.</td></tr>';
+
+    renderInquiryDetail(state.selectedInquiryId);
+  }
+
+  function renderInquiryDetail(id) {
+    const detail = document.getElementById("inquiry-detail");
+    if (!detail) {
+      return;
+    }
+
+    const inquiry = state.inquiries.find((item) => item.id === id) || filteredInquiries()[0];
+    if (!inquiry) {
+      detail.innerHTML = '<p class="empty-state">Select an inquiry to review details.</p>';
+      return;
+    }
+
+    state.selectedInquiryId = inquiry.id;
+    const related = inquiryRelated(inquiry);
+    detail.innerHTML = `
+      <div class="inquiry-detail-grid">
+        <div class="inquiry-detail-card">
+          <p class="section-kicker">Visitor</p>
+          <h3>${escapeHtml(inquiry.visitorName)}</h3>
+          <p><a href="mailto:${attr(inquiry.visitorEmail)}">${escapeHtml(inquiry.visitorEmail)}</a></p>
+          ${inquiry.visitorPhone ? `<p>${escapeHtml(inquiry.visitorPhone)}</p>` : ""}
+          ${inquiry.preferredContactMethod ? `<p>Prefers ${escapeHtml(inquiry.preferredContactMethod)}</p>` : ""}
+        </div>
+        <div class="inquiry-detail-card">
+          <p class="section-kicker">Context</p>
+          <h3>${escapeHtml(related.artist || "The Galleria.Art")}</h3>
+          ${related.gallery ? `<p>${escapeHtml(related.gallery)}</p>` : ""}
+          ${related.artwork ? `<p>${escapeHtml(related.artwork)}</p>` : ""}
+          ${inquiry.sourceUrl ? `<p><a href="${attr(inquiry.sourceUrl)}">${escapeHtml(inquiry.sourceUrl)}</a></p>` : ""}
+        </div>
+      </div>
+      <div class="inquiry-message-block">
+        <p class="section-kicker">Message</p>
+        <p>${escapeHtml(inquiry.message)}</p>
+      </div>
+      <form class="admin-record-form" id="inquiry-detail-form" data-inquiry-id="${attr(inquiry.id)}">
+        ${select("status", "Status", inquiry.status || "new", inquiryStatusOptions.map((status) => ({ value: status, label: status })))}
+        ${textarea("internalNotes", "Internal Notes", inquiry.internalNotes)}
+      </form>
+      <div class="admin-actions">
+        <button class="admin-primary-action" type="submit" form="inquiry-detail-form">Save Inquiry</button>
+        <a href="${mailtoForInquiry(inquiry)}">Reply by Email</a>
+      </div>
+      <p class="admin-muted">Created ${escapeHtml(formatDateTime(inquiry.createdAt))}. Updated ${escapeHtml(formatDateTime(inquiry.updatedAt))}.</p>
+    `;
+  }
+
   function renderAll() {
     renderDashboard();
     renderMediaOwnerSelect();
@@ -536,6 +725,7 @@
     renderGalleries();
     renderArtwork();
     renderMedia();
+    renderInquiries();
   }
 
   function updateFromPayload(payload) {
@@ -561,6 +751,27 @@
     }
 
     const payload = await api(`${endpoint}/${encodeURIComponent(id)}/archive`, { method: "POST", body: "{}" });
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Archive failed.");
+  }
+
+  async function saveInquiry(form) {
+    const id = form.dataset.inquiryId;
+    const payload = await api(`/admin/api/inquiries/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify(formData(form))
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Inquiry update failed.");
+  }
+
+  async function archiveInquiry(id) {
+    const payload = await api(`/admin/api/inquiries/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify({ status: "archived", internalNotes: state.inquiries.find((inquiry) => inquiry.id === id)?.internalNotes || "" })
+    });
+
     updateFromPayload(payload);
     showMessage(payload.ok ? "success" : "error", payload.message || "Archive failed.");
   }
@@ -593,6 +804,8 @@
       const artworkArchive = event.target.closest("[data-archive-artwork]");
       const mediaArchive = event.target.closest("[data-archive-media]");
       const copyButton = event.target.closest("[data-copy-path]");
+      const inquiryView = event.target.closest("[data-view-inquiry]");
+      const inquiryArchive = event.target.closest("[data-archive-inquiry]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -618,6 +831,12 @@
       if (copyButton) {
         copyPath(copyButton.dataset.copyPath);
       }
+      if (inquiryView) {
+        renderInquiryDetail(inquiryView.dataset.viewInquiry);
+      }
+      if (inquiryArchive) {
+        archiveInquiry(inquiryArchive.dataset.archiveInquiry);
+      }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
       }
@@ -631,12 +850,17 @@
 
     document.addEventListener("change", (event) => {
       const mediaSelect = event.target.closest("[data-media-select]");
+      const inquiryFilter = event.target.closest("#inquiry-status-filter, #inquiry-artist-filter");
       if (mediaSelect?.value) {
         const input = document.querySelector(`[name="${mediaSelect.dataset.mediaSelect}"]`);
         if (input) {
           input.value = mediaSelect.value;
           updateImagePreview(mediaSelect.dataset.mediaSelect, mediaSelect.value);
         }
+      }
+      if (inquiryFilter) {
+        state.selectedInquiryId = "";
+        renderInquiries();
       }
     });
 
@@ -670,6 +894,14 @@
     mediaUploadForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       uploadMedia(mediaUploadForm);
+    });
+
+    document.addEventListener("submit", (event) => {
+      const inquiryForm = event.target.closest("#inquiry-detail-form");
+      if (inquiryForm) {
+        event.preventDefault();
+        saveInquiry(inquiryForm);
+      }
     });
   }
 

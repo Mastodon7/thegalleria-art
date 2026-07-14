@@ -26,6 +26,11 @@ const artistSessionCookieName = "galleria_artist";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 const validStatuses = new Set(["draft", "published", "archived"]);
 const validInvitationStatuses = new Set(["current", "invited", "pending", "accepted", "none"]);
+const validInquiryStatuses = new Set(["new", "reviewed", "replied", "archived", "spam"]);
+const inquiryRateLimit = new Map();
+const inquiryRateLimitWindowMs = 10 * 60 * 1000;
+const inquiryRateLimitMax = 6;
+const maxInquiryMessageLength = 3000;
 const allowedImageTypes = new Map([
   ["image/jpeg", ".jpg"],
   ["image/png", ".png"],
@@ -181,6 +186,7 @@ function normalizeContent(content) {
     galleries: Array.isArray(content.galleries) ? content.galleries : [],
     artwork: Array.isArray(content.artwork) ? content.artwork : [],
     media: Array.isArray(content.media) ? content.media : [],
+    inquiries: Array.isArray(content.inquiries) ? content.inquiries : [],
     artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : []
   };
 }
@@ -210,7 +216,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "galleries", "artwork", "media", "artistAccounts"].forEach((collection) => {
+  ["artists", "galleries", "artwork", "media", "inquiries", "artistAccounts"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -422,7 +428,7 @@ function renderPublicArtistPage(artist) {
         <div class="dynamic-artwork-grid">
           ${artworks.map((artwork, index) => `
             <article class="dynamic-artwork-card">
-              <button class="dynamic-lightbox-trigger" type="button" data-index="${index}" data-src="${escapeHtml(artwork.largeImage || artwork.image)}" data-title="${escapeHtml(artwork.title)}" data-meta="${escapeHtml([artwork.year, artwork.location, artwork.medium].filter(Boolean).join(" - "))}" aria-label="View ${escapeHtml(artwork.title)}">
+              <button class="dynamic-lightbox-trigger" type="button" data-index="${index}" data-src="${escapeHtml(artwork.largeImage || artwork.image)}" data-title="${escapeHtml(artwork.title)}" data-meta="${escapeHtml([artwork.year, artwork.location, artwork.medium].filter(Boolean).join(" - "))}" data-artist-id="${escapeHtml(artist.id)}" data-gallery-id="${escapeHtml(artwork.galleryId || primaryGallery.id || "")}" data-artwork-id="${escapeHtml(artwork.id)}" aria-label="View ${escapeHtml(artwork.title)}">
                 <img src="${escapeHtml(artwork.image)}" alt="${escapeHtml(artwork.alt || artwork.title)}" loading="lazy">
               </button>
               <div>
@@ -430,6 +436,7 @@ function renderPublicArtistPage(artist) {
                 <h3>${escapeHtml(artwork.title)}</h3>
                 <span>${escapeHtml([artwork.year, artwork.location].filter(Boolean).join(" - "))}</span>
                 <p>${escapeHtml(artwork.description || "")}</p>
+                <button class="dynamic-inquiry-link" type="button" data-inquiry-select="${escapeHtml(artwork.id)}">Inquire About This Work</button>
               </div>
             </article>
           `).join("")}
@@ -440,9 +447,51 @@ function renderPublicArtistPage(artist) {
     <section class="invitation-section" aria-labelledby="inquiry-title">
       <div class="section-inner invitation-copy">
         <p class="section-kicker">Inquiry</p>
-        <h2 id="inquiry-title">Ask about the work</h2>
-        <p>This public demo gallery is prepared for collector-facing viewing and future inquiry workflows.</p>
-        ${artist.contactEmail ? `<a class="home-button" href="mailto:${escapeHtml(artist.contactEmail)}?subject=Artwork%20Inquiry">Contact Artist</a>` : `<a class="home-button" href="/contact/">Contact The Galleria.Art</a>`}
+        <h2 id="inquiry-title">Inquire About This Work</h2>
+        <p>Send a private inquiry about ${escapeHtml(artist.name)} or a specific artwork. The Galleria.Art will route the message to the appropriate artist contact.</p>
+        <form class="inquiry-form" data-inquiry-form>
+          <input name="inquiryType" type="hidden" value="artist">
+          <input name="artistId" type="hidden" value="${escapeHtml(artist.id)}">
+          <input name="galleryId" type="hidden" value="${escapeHtml(primaryGallery.id || "")}">
+          <input name="sourceUrl" type="hidden" value="${escapeHtml(publicPathForArtist(artist))}">
+          <label>
+            <span>Name</span>
+            <input name="name" autocomplete="name" required>
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" required>
+          </label>
+          <label>
+            <span>Phone Optional</span>
+            <input name="phone" autocomplete="tel">
+          </label>
+          <label>
+            <span>Preferred Contact</span>
+            <select name="preferredContactMethod">
+              <option value="email">Email</option>
+              <option value="phone">Phone</option>
+              <option value="either">Either</option>
+            </select>
+          </label>
+          <label class="admin-field-wide">
+            <span>Artwork Optional</span>
+            <select name="artworkId" data-inquiry-artwork-select>
+              <option value="">General inquiry about ${escapeHtml(artist.name)}</option>
+              ${artworks.map((artwork) => `<option value="${escapeHtml(artwork.id)}">${escapeHtml(artwork.title)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="admin-field-wide">
+            <span>Message</span>
+            <textarea name="message" maxlength="${maxInquiryMessageLength}" required></textarea>
+          </label>
+          <label class="inquiry-honeypot" aria-hidden="true">
+            <span>Website</span>
+            <input name="companyWebsite" tabindex="-1" autocomplete="off">
+          </label>
+          <button class="home-button" type="submit">Send Inquiry</button>
+          <p class="inquiry-feedback" data-inquiry-feedback aria-live="polite"></p>
+        </form>
       </div>
     </section>
   </main>
@@ -455,6 +504,7 @@ function renderPublicArtistPage(artist) {
       <figcaption>
         <strong id="dynamic-lightbox-title"></strong>
         <span id="dynamic-lightbox-meta"></span>
+        <button class="dynamic-inquiry-link" id="dynamic-lightbox-inquire" type="button">Inquire About This Work</button>
       </figcaption>
     </figure>
     <button class="dynamic-lightbox-next" type="button" aria-label="Next artwork">&gt;</button>
@@ -471,6 +521,7 @@ function renderPublicArtistPage(artist) {
     <p>&copy; 2026 The Galleria.Art. All rights reserved.</p>
   </footer>
   <script src="/dynamic-gallery.js"></script>
+  <script src="/inquiry.js"></script>
 </body>
 </html>`;
 }
@@ -716,6 +767,31 @@ function collectJson(request, response, callback) {
 
 function cleanString(value) {
   return String(value || "").trim();
+}
+
+function cleanLimitedString(value, maxLength) {
+  return cleanString(value).slice(0, maxLength);
+}
+
+function clientKey(request) {
+  return cleanString(request.headers["x-forwarded-for"]).split(",")[0] ||
+    request.socket.remoteAddress ||
+    "unknown";
+}
+
+function rateLimitInquiry(request) {
+  const key = clientKey(request);
+  const now = Date.now();
+  const entry = inquiryRateLimit.get(key) || { count: 0, resetAt: now + inquiryRateLimitWindowMs };
+
+  if (entry.resetAt <= now) {
+    entry.count = 0;
+    entry.resetAt = now + inquiryRateLimitWindowMs;
+  }
+
+  entry.count += 1;
+  inquiryRateLimit.set(key, entry);
+  return entry.count <= inquiryRateLimitMax;
 }
 
 function sanitizeFilename(filename) {
@@ -1094,6 +1170,10 @@ function hasValidInvitationStatus(value) {
   return validInvitationStatuses.has(value);
 }
 
+function hasValidInquiryStatus(value) {
+  return validInquiryStatuses.has(value);
+}
+
 function generateId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -1435,6 +1515,258 @@ function archiveMedia(id) {
   };
 }
 
+function publishedArtistById(content, id) {
+  return content.artists.find((artist) => artist.id === id && artist.status === "published") || null;
+}
+
+function publishedGalleryById(content, id) {
+  return content.galleries.find((gallery) => gallery.id === id && gallery.status === "published") || null;
+}
+
+function publishedArtworkById(content, id) {
+  return content.artwork.find((item) => item.id === id && item.status === "published") || null;
+}
+
+function inquiryContextFromInput(content, input) {
+  let artistId = cleanString(input.artistId);
+  let galleryId = cleanString(input.galleryId);
+  let artworkId = cleanString(input.artworkId);
+  let artist = null;
+  let gallery = null;
+  let artwork = null;
+
+  if (artworkId) {
+    artwork = publishedArtworkById(content, artworkId);
+    if (!artwork) {
+      return { errors: ["Selected artwork is not available for inquiry."] };
+    }
+    artistId = artwork.artistId;
+    galleryId = artwork.galleryId;
+  }
+
+  if (galleryId) {
+    gallery = publishedGalleryById(content, galleryId);
+    if (!gallery) {
+      return { errors: ["Selected gallery is not available for inquiry."] };
+    }
+    if (artwork && artwork.galleryId !== gallery.id) {
+      return { errors: ["Selected artwork does not belong to this gallery."] };
+    }
+    artistId = gallery.artistId;
+  }
+
+  if (artistId) {
+    artist = publishedArtistById(content, artistId);
+    if (!artist) {
+      return { errors: ["Selected artist is not available for inquiry."] };
+    }
+    if (gallery && gallery.artistId !== artist.id) {
+      return { errors: ["Selected gallery does not belong to this artist."] };
+    }
+    if (artwork && artwork.artistId !== artist.id) {
+      return { errors: ["Selected artwork does not belong to this artist."] };
+    }
+  }
+
+  return { artist, gallery, artwork, artistId, galleryId, artworkId };
+}
+
+function sanitizePreferredContactMethod(value) {
+  const method = cleanString(value).toLowerCase();
+  return ["email", "phone", "either"].includes(method) ? method : "";
+}
+
+function validatePublicInquiry(content, input) {
+  const errors = [];
+  const name = cleanLimitedString(input.name, 120);
+  const email = cleanLimitedString(input.email, 160).toLowerCase();
+  const phone = cleanLimitedString(input.phone, 80);
+  const message = cleanLimitedString(input.message, maxInquiryMessageLength);
+  const preferredContactMethod = sanitizePreferredContactMethod(input.preferredContactMethod);
+  const context = inquiryContextFromInput(content, input);
+
+  if (context.errors) {
+    errors.push(...context.errors);
+  }
+
+  if (!name) {
+    errors.push("Name is required.");
+  }
+
+  if (!email) {
+    errors.push("Email is required.");
+  } else if (!isValidEmail(email)) {
+    errors.push("Enter a valid email address.");
+  }
+
+  if (!message) {
+    errors.push("Message is required.");
+  } else if (message.length < 10) {
+    errors.push("Message must be at least 10 characters.");
+  }
+
+  if (cleanString(input.message).length > maxInquiryMessageLength) {
+    errors.push(`Message must be ${maxInquiryMessageLength} characters or less.`);
+  }
+
+  const inquiryType = context.artwork ? "artwork" : context.gallery ? "gallery" : context.artist ? "artist" : cleanString(input.inquiryType) || "general";
+
+  return {
+    errors,
+    record: {
+      id: generateId("inquiry"),
+      inquiryType,
+      artistId: context.artistId || "",
+      galleryId: context.galleryId || "",
+      artworkId: context.artworkId || "",
+      sourceUrl: cleanLimitedString(input.sourceUrl, 500),
+      visitorName: name,
+      visitorEmail: email,
+      visitorPhone: phone,
+      message,
+      preferredContactMethod,
+      status: "new",
+      assignedArtistId: context.artistId || "",
+      assignedAdminId: "",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      internalNotes: "",
+      sourceMetadata: {}
+    }
+  };
+}
+
+function parseInquiryPayload(request, response, callback) {
+  collectBody(request, (body) => {
+    const contentType = request.headers["content-type"] || "";
+    let payload = {};
+
+    try {
+      if (contentType.includes("application/json")) {
+        payload = body ? JSON.parse(body) : {};
+      } else {
+        payload = Object.fromEntries(new URLSearchParams(body));
+      }
+    } catch (error) {
+      sendJson(response, 400, { ok: false, message: "Invalid request data." });
+      return;
+    }
+
+    callback(payload);
+  });
+}
+
+function handlePublicInquiry(request, response) {
+  if (!rateLimitInquiry(request)) {
+    sendJson(response, 429, { ok: false, message: "Please wait a few minutes before sending another inquiry." });
+    return;
+  }
+
+  parseInquiryPayload(request, response, (input) => {
+    if (cleanString(input.companyWebsite || input.website)) {
+      sendJson(response, 200, { ok: true, message: "Thank you. Your inquiry has been received." });
+      return;
+    }
+
+    const content = loadContent();
+    const result = validatePublicInquiry(content, input);
+
+    if (result.errors.length) {
+      sendJson(response, 422, {
+        ok: false,
+        message: "Please fix the highlighted fields.",
+        errors: result.errors
+      });
+      return;
+    }
+
+    result.record.sourceMetadata = {
+      referrer: cleanLimitedString(request.headers.referer, 500),
+      userAgent: cleanLimitedString(request.headers["user-agent"], 300)
+    };
+
+    content.inquiries.push(result.record);
+    saveContent(content, "inquiry-create");
+    sendJson(response, 200, {
+      ok: true,
+      message: "Thank you. Your inquiry has been received.",
+      inquiryId: result.record.id
+    });
+  });
+}
+
+function inquiryBelongsToArtist(content, inquiry, artistId) {
+  if (!inquiry || !artistId) {
+    return false;
+  }
+
+  if (inquiry.artistId === artistId || inquiry.assignedArtistId === artistId) {
+    return true;
+  }
+
+  const gallery = content.galleries.find((item) => item.id === inquiry.galleryId);
+  const artwork = content.artwork.find((item) => item.id === inquiry.artworkId);
+  return gallery?.artistId === artistId || artwork?.artistId === artistId;
+}
+
+function artistInquirySafe(inquiry) {
+  return {
+    id: inquiry.id,
+    inquiryType: inquiry.inquiryType,
+    artistId: inquiry.artistId,
+    galleryId: inquiry.galleryId,
+    artworkId: inquiry.artworkId,
+    sourceUrl: inquiry.sourceUrl,
+    visitorName: inquiry.visitorName,
+    visitorEmail: inquiry.visitorEmail,
+    visitorPhone: inquiry.visitorPhone,
+    message: inquiry.message,
+    preferredContactMethod: inquiry.preferredContactMethod,
+    status: inquiry.status,
+    createdAt: inquiry.createdAt,
+    updatedAt: inquiry.updatedAt
+  };
+}
+
+function artistScopedInquiries(content, artistId) {
+  return (content.inquiries || [])
+    .filter((inquiry) => inquiryBelongsToArtist(content, inquiry, artistId))
+    .map(artistInquirySafe);
+}
+
+function updateInquiry(id, input, options = {}) {
+  const content = loadContent();
+  const inquiry = content.inquiries.find((item) => item.id === id);
+
+  if (!inquiry) {
+    return { ok: false, statusCode: 404, message: "Inquiry was not found." };
+  }
+
+  if (options.artistId && !inquiryBelongsToArtist(content, inquiry, options.artistId)) {
+    return { ok: false, statusCode: 404, message: "Inquiry was not found." };
+  }
+
+  const status = cleanString(input.status || inquiry.status || "new");
+  if (!hasValidInquiryStatus(status)) {
+    return { ok: false, statusCode: 422, message: "Inquiry status is not valid." };
+  }
+
+  inquiry.status = status;
+  inquiry.updatedAt = nowIso();
+
+  if (options.admin) {
+    inquiry.internalNotes = cleanLimitedString(input.internalNotes, 4000);
+  }
+
+  saveContent(content, "inquiry-update");
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Inquiry updated.",
+    content
+  };
+}
+
 function verifyArtistPassword(password, account) {
   if (!account?.passwordHash || !account?.passwordSalt) {
     return false;
@@ -1530,7 +1862,8 @@ function buildArtistPortalContent(context) {
     artist: context.artist,
     galleries,
     artwork,
-    media: artistScopedMedia(context.content, context.artist, galleries, artwork)
+    media: artistScopedMedia(context.content, context.artist, galleries, artwork),
+    inquiries: artistScopedInquiries(context.content, context.artist.id)
   };
 }
 
@@ -1761,6 +2094,19 @@ function handleArtistApi(request, response, pathname) {
     return;
   }
 
+  const inquiryMatch = pathname.match(/^\/artist\/api\/inquiries\/([^/]+)$/);
+  if (request.method === "POST" && inquiryMatch) {
+    collectJson(request, response, (input) => {
+      const result = updateInquiry(decodeURIComponent(inquiryMatch[1]), input, { artistId: context.artist.id });
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        content: result.content ? buildArtistPortalContent({ ...context, content: result.content }) : buildArtistPortalContent(context)
+      });
+    });
+    return;
+  }
+
   sendJson(response, 404, { ok: false, message: "Artist endpoint was not found." });
 }
 
@@ -1822,6 +2168,19 @@ function handleAdminApi(request, response, pathname) {
       ok: result.ok,
       message: result.message,
       content: publicSafeContent(result.content || loadContent())
+    });
+    return;
+  }
+
+  const inquiryMatch = pathname.match(/^\/admin\/api\/inquiries\/([^/]+)$/);
+  if (request.method === "POST" && inquiryMatch) {
+    collectJson(request, response, (input) => {
+      const result = updateInquiry(decodeURIComponent(inquiryMatch[1]), input, { admin: true });
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        content: publicSafeContent(result.content || loadContent())
+      });
     });
     return;
   }
@@ -1943,6 +2302,11 @@ function handleRequest(request, response) {
 
   if (request.method === "POST" && pathname === "/artist/logout") {
     redirect(response, "/artist/login/", 303, { "Set-Cookie": clearSessionCookie(artistSessionCookieName) });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/inquiries") {
+    handlePublicInquiry(request, response);
     return;
   }
 
