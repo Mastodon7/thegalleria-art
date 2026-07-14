@@ -8,6 +8,9 @@ const publicDir = path.join(__dirname, "public");
 const seedPath = path.join(__dirname, "seed-content.json");
 const dataDir = process.env.DATA_DIR || path.join(__dirname, "content-data");
 const dataFile = process.env.CONTENT_DATA_FILE || path.join(dataDir, "content.json");
+const mediaDir = process.env.MEDIA_DIR || path.join(dataDir, "media");
+const uploadBasePath = "/uploads";
+const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 8 * 1024 * 1024);
 const port = Number(process.env.PORT || 80);
 const adminEmail = process.env.ADMIN_EMAIL || "mc@25mprinting.com";
 const passwordSalt = process.env.ADMIN_PASSWORD_SALT || "galleria-admin-bootstrap-v1";
@@ -18,6 +21,11 @@ const sessionCookieName = "galleria_admin";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 const validStatuses = new Set(["draft", "published", "archived"]);
 const validInvitationStatuses = new Set(["current", "invited", "pending", "none"]);
+const allowedImageTypes = new Map([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"]
+]);
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -141,7 +149,8 @@ function normalizeContent(content) {
     version: 1,
     artists: Array.isArray(content.artists) ? content.artists : [],
     galleries: Array.isArray(content.galleries) ? content.galleries : [],
-    artwork: Array.isArray(content.artwork) ? content.artwork : []
+    artwork: Array.isArray(content.artwork) ? content.artwork : [],
+    media: Array.isArray(content.media) ? content.media : []
   };
 }
 
@@ -170,8 +179,8 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "galleries", "artwork"].forEach((collection) => {
-    seed[collection].forEach((seedRecord) => {
+  ["artists", "galleries", "artwork", "media"].forEach((collection) => {
+    (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
         changed = true;
@@ -184,6 +193,7 @@ function mergeMissingSeedRecords(content, seed) {
 
 function ensureContentStore() {
   fs.mkdirSync(dataDir, { recursive: true });
+  fs.mkdirSync(mediaDir, { recursive: true });
   const seed = normalizeContent(readSeedContent());
 
   if (!fs.existsSync(dataFile)) {
@@ -235,6 +245,29 @@ function sendPublicGalleryData(response) {
   const publicData = buildPublicData(loadContent());
   response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
   response.end(`window.GalleriaData = ${JSON.stringify(publicData, null, 2)};\n`);
+}
+
+function serveUploadedMedia(response, pathname) {
+  let requestedPath;
+
+  try {
+    requestedPath = decodeURIComponent(pathname.replace(`${uploadBasePath}/`, ""));
+  } catch (error) {
+    response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Bad request");
+    return;
+  }
+
+  const normalizedPath = path.normalize(requestedPath);
+  const absolutePath = path.join(mediaDir, normalizedPath);
+
+  if (absolutePath !== mediaDir && !absolutePath.startsWith(`${mediaDir}${path.sep}`)) {
+    response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Forbidden");
+    return;
+  }
+
+  sendFile(response, absolutePath);
 }
 
 function sendFile(response, filePath, statusCode = 200) {
@@ -335,6 +368,25 @@ function collectBody(request, callback) {
   request.on("end", () => callback(body));
 }
 
+function collectBuffer(request, response, callback) {
+  const chunks = [];
+  let size = 0;
+
+  request.on("data", (chunk) => {
+    size += chunk.length;
+
+    if (size > maxUploadBytes + 2048) {
+      sendJson(response, 413, { ok: false, message: "Image file is too large." });
+      request.destroy();
+      return;
+    }
+
+    chunks.push(chunk);
+  });
+
+  request.on("end", () => callback(Buffer.concat(chunks)));
+}
+
 function collectJson(request, response, callback) {
   collectBody(request, (body) => {
     let payload;
@@ -352,6 +404,145 @@ function collectJson(request, response, callback) {
 
 function cleanString(value) {
   return String(value || "").trim();
+}
+
+function sanitizeFilename(filename) {
+  const parsed = path.parse(String(filename || "upload"));
+  const safeBase = parsed.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "upload";
+
+  return safeBase;
+}
+
+function parseMultipartUpload(request, buffer) {
+  const contentType = request.headers["content-type"] || "";
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+
+  if (!boundaryMatch) {
+    return null;
+  }
+
+  const boundary = `--${boundaryMatch[1] || boundaryMatch[2]}`;
+  const body = buffer.toString("binary");
+  const parts = body.split(boundary);
+
+  for (const part of parts) {
+    if (!part.includes("Content-Disposition") || !part.includes('name="image"')) {
+      continue;
+    }
+
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd < 0) {
+      continue;
+    }
+
+    const headers = part.slice(0, headerEnd);
+    let content = part.slice(headerEnd + 4);
+    content = content.replace(/\r\n--$/, "").replace(/\r\n$/, "");
+
+    const filename = headers.match(/filename="([^"]*)"/i)?.[1] || "upload";
+    const mimeType = headers.match(/Content-Type:\s*([^\r\n]+)/i)?.[1]?.trim().toLowerCase() || "";
+
+    return {
+      originalFilename: path.basename(filename),
+      mimeType,
+      buffer: Buffer.from(content, "binary")
+    };
+  }
+
+  return null;
+}
+
+function readPngSize(buffer) {
+  if (buffer.length >= 24 && buffer.toString("ascii", 1, 4) === "PNG") {
+    return {
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20)
+    };
+  }
+
+  return {};
+}
+
+function readJpegSize(buffer) {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+    return {};
+  }
+
+  let offset = 2;
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = buffer[offset + 1];
+    const length = buffer.readUInt16BE(offset + 2);
+
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return {
+        height: buffer.readUInt16BE(offset + 5),
+        width: buffer.readUInt16BE(offset + 7)
+      };
+    }
+
+    offset += 2 + length;
+  }
+
+  return {};
+}
+
+function readWebpSize(buffer) {
+  if (buffer.length < 30 || buffer.toString("ascii", 0, 4) !== "RIFF" || buffer.toString("ascii", 8, 12) !== "WEBP") {
+    return {};
+  }
+
+  const chunk = buffer.toString("ascii", 12, 16);
+  if (chunk === "VP8X" && buffer.length >= 30) {
+    return {
+      width: 1 + buffer.readUIntLE(24, 3),
+      height: 1 + buffer.readUIntLE(27, 3)
+    };
+  }
+
+  if (chunk === "VP8 " && buffer.length >= 30) {
+    return {
+      width: buffer.readUInt16LE(26) & 0x3fff,
+      height: buffer.readUInt16LE(28) & 0x3fff
+    };
+  }
+
+  if (chunk === "VP8L" && buffer.length >= 25) {
+    const b0 = buffer[21];
+    const b1 = buffer[22];
+    const b2 = buffer[23];
+    const b3 = buffer[24];
+    return {
+      width: 1 + (((b1 & 0x3f) << 8) | b0),
+      height: 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6))
+    };
+  }
+
+  return {};
+}
+
+function readImageSize(buffer, mimeType) {
+  if (mimeType === "image/png") {
+    return readPngSize(buffer);
+  }
+
+  if (mimeType === "image/jpeg") {
+    return readJpegSize(buffer);
+  }
+
+  if (mimeType === "image/webp") {
+    return readWebpSize(buffer);
+  }
+
+  return {};
 }
 
 function parseBoolean(value) {
@@ -629,6 +820,102 @@ function archiveRecord(resource, id) {
   };
 }
 
+function isMediaInUse(content, publicPath) {
+  return content.artists.some((artist) => artist.heroImage === publicPath || artist.profileImage === publicPath) ||
+    content.galleries.some((gallery) => gallery.coverImage === publicPath) ||
+    content.artwork.some((artwork) => artwork.image === publicPath);
+}
+
+function handleMediaUpload(request, response) {
+  collectBuffer(request, response, (body) => {
+    const upload = parseMultipartUpload(request, body);
+
+    if (!upload || !upload.buffer.length) {
+      sendJson(response, 400, { ok: false, message: "Choose an image file to upload." });
+      return;
+    }
+
+    if (!allowedImageTypes.has(upload.mimeType)) {
+      sendJson(response, 422, { ok: false, message: "Unsupported file type. Upload JPG, PNG, or WebP images only." });
+      return;
+    }
+
+    if (upload.buffer.length > maxUploadBytes) {
+      sendJson(response, 413, { ok: false, message: "Image file is too large." });
+      return;
+    }
+
+    const content = loadContent();
+    fs.mkdirSync(mediaDir, { recursive: true });
+
+    const mediaId = generateId("media");
+    const extension = allowedImageTypes.get(upload.mimeType);
+    const safeBase = sanitizeFilename(upload.originalFilename);
+    const storedFilename = `${safeBase}-${mediaId.replace("media-", "").slice(0, 12)}${extension}`;
+    const absolutePath = path.join(mediaDir, storedFilename);
+
+    if (!absolutePath.startsWith(`${mediaDir}${path.sep}`)) {
+      sendJson(response, 400, { ok: false, message: "Invalid upload path." });
+      return;
+    }
+
+    if (fs.existsSync(absolutePath)) {
+      sendJson(response, 409, { ok: false, message: "A file with that generated name already exists. Please try again." });
+      return;
+    }
+
+    const size = readImageSize(upload.buffer, upload.mimeType);
+    fs.writeFileSync(absolutePath, upload.buffer);
+
+    const record = {
+      id: mediaId,
+      originalFilename: upload.originalFilename,
+      storedFilename,
+      publicPath: `${uploadBasePath}/${storedFilename}`,
+      mimeType: upload.mimeType,
+      size: upload.buffer.length,
+      width: size.width || null,
+      height: size.height || null,
+      uploadedAt: nowIso(),
+      updatedAt: nowIso(),
+      status: "published"
+    };
+
+    content.media.push(record);
+    saveContent(content, "media-upload");
+    sendJson(response, 200, {
+      ok: true,
+      message: "Image uploaded successfully.",
+      media: record,
+      content
+    });
+  });
+}
+
+function archiveMedia(id) {
+  const content = loadContent();
+  const media = content.media.find((item) => item.id === id);
+
+  if (!media) {
+    return { ok: false, statusCode: 404, message: "Media record was not found." };
+  }
+
+  if (isMediaInUse(content, media.publicPath)) {
+    return { ok: false, statusCode: 409, message: "This image is currently assigned to a record. Remove it from records before archiving." };
+  }
+
+  media.status = "archived";
+  media.updatedAt = nowIso();
+  saveContent(content, "media-archive");
+
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Image archived successfully.",
+    content
+  };
+}
+
 function requireAdminForApi(request, response) {
   if (getSession(request)) {
     return true;
@@ -645,6 +932,11 @@ function handleAdminApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/admin/api/content") {
     sendJson(response, 200, { ok: true, content: loadContent() });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/admin/api/media/upload") {
+    handleMediaUpload(request, response);
     return;
   }
 
@@ -667,6 +959,17 @@ function handleAdminApi(request, response, pathname) {
   if (request.method === "POST" && archiveMatch) {
     const resource = archiveMatch[1] === "artists" ? "artist" : archiveMatch[1] === "galleries" ? "gallery" : "artwork";
     const result = archiveRecord(resource, decodeURIComponent(archiveMatch[2]));
+    sendJson(response, result.statusCode, {
+      ok: result.ok,
+      message: result.message,
+      content: result.content || loadContent()
+    });
+    return;
+  }
+
+  const mediaArchiveMatch = pathname.match(/^\/admin\/api\/media\/([^/]+)\/archive$/);
+  if (request.method === "POST" && mediaArchiveMatch) {
+    const result = archiveMedia(decodeURIComponent(mediaArchiveMatch[1]));
     sendJson(response, result.statusCode, {
       ok: result.ok,
       message: result.message,
@@ -737,6 +1040,11 @@ function handleRequest(request, response) {
 
   if (request.method === "GET" && pathname === "/gallery-data.js") {
     sendPublicGalleryData(response);
+    return;
+  }
+
+  if (request.method === "GET" && pathname.startsWith(`${uploadBasePath}/`)) {
+    serveUploadedMedia(response, pathname);
     return;
   }
 

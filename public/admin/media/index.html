@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Media | The Galleria.Art Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav" aria-label="Admin navigation">
+        <a href="/admin/">Dashboard</a>
+        <a href="/admin/artists/">Artists</a>
+        <a href="/admin/galleries/">Galleries</a>
+        <a href="/admin/artwork/">Artwork</a>
+        <a aria-current="page" href="/admin/media/">Media</a>
+        <a href="/admin/settings/">Settings</a>
+      </nav>
+      <form action="/admin/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="media-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Image Management</p>
+          <h1 id="media-title">Media</h1>
+          <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
+        </div>
+      </div>
+
+      <section class="admin-panel" aria-labelledby="media-upload-title">
+        <h2 id="media-upload-title">Upload Image</h2>
+        <p class="admin-muted">Upload JPG, PNG, or WebP images up to 8 MB. Uploaded paths can be assigned to artist, gallery, and artwork records.</p>
+        <form class="admin-upload-form" id="media-upload-form">
+          <label>
+            <span>Image File</span>
+            <input name="image" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required>
+          </label>
+          <button class="admin-primary-action" type="submit">Upload Image</button>
+        </form>
+      </section>
+
+      <section class="admin-panel" aria-labelledby="media-library-title">
+        <h2 id="media-library-title">Image Library</h2>
+        <div class="admin-media-grid" id="media-grid" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

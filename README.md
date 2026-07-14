@@ -38,6 +38,12 @@ Phase 5 adds writable JSON content storage for artists, galleries, and artwork. 
 
 For Coolify, keep the Dockerfile deployment and mount persistent storage at `/data` or set `DATA_DIR` to another persistent path. The server creates backup files before save/archive writes and does not overwrite existing content on startup.
 
+## Admin media uploads
+
+Phase 6 adds protected media uploads at `/admin/media/`. Uploaded JPG, PNG, and WebP images are stored in `DATA_DIR/media` by default and served publicly from `/uploads/...` so published artist, gallery, and artwork records can reuse them.
+
+For Coolify, the same persistent `/data` mount used for `DATA_DIR` should remain in place. That keeps both `content.json` and uploaded media files outside the transient build output.
+
 ## Coolify
 
 1. Push this folder to a GitHub repository.

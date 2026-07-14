@@ -4,7 +4,8 @@
   const state = {
     artists: [],
     galleries: [],
-    artwork: []
+    artwork: [],
+    media: []
   };
 
   function escapeHtml(value) {
@@ -28,6 +29,10 @@
     return `<span class="admin-badge status-${escapeHtml(value)}">${escapeHtml(value)}</span>`;
   }
 
+  function activeMedia() {
+    return state.media.filter((media) => media.status !== "archived");
+  }
+
   function publicArtistUrl(artist) {
     return artist?.canonicalPath || `/${artist?.slug || ""}/`;
   }
@@ -42,6 +47,20 @@
       month: "short",
       day: "numeric"
     });
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value || 0);
+
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    if (bytes >= 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+
+    return `${bytes} B`;
   }
 
   function artistById(id) {
@@ -104,10 +123,28 @@
     return payload;
   }
 
+  async function uploadApi(path, formData) {
+    const response = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      body: formData
+    });
+    const payload = await response.json();
+
+    if (response.status === 401) {
+      showMessage("error", payload.message || "Unauthorized access. Please log in again.");
+      window.location.href = "/admin/login/";
+      throw new Error("Unauthorized");
+    }
+
+    return payload;
+  }
+
   function applyContent(content) {
     state.artists = content.artists || [];
     state.galleries = content.galleries || [];
     state.artwork = content.artwork || [];
+    state.media = content.media || [];
   }
 
   async function loadContent() {
@@ -121,6 +158,30 @@
         <span>${label}</span>
         <input name="${name}" type="${type}" value="${attr(value)}">
       </label>
+    `;
+  }
+
+  function imageField(name, label, value) {
+    const media = activeMedia();
+    return `
+      <div class="admin-image-field">
+        <label>
+          <span>${label}</span>
+          <input name="${name}" type="text" value="${attr(value)}" data-image-input="${name}">
+        </label>
+        <label>
+          <span>Choose Uploaded Image</span>
+          <select data-media-select="${name}">
+            <option value="">Select uploaded image</option>
+            ${media.map((item) => `
+              <option value="${attr(item.publicPath)}"${item.publicPath === value ? " selected" : ""}>${escapeHtml(item.originalFilename)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <div class="admin-image-preview" data-image-preview="${name}">
+          ${value ? `<img src="${attr(value)}" alt="">` : "<span>No image selected</span>"}
+        </div>
+      </div>
     `;
   }
 
@@ -172,10 +233,20 @@
     return data;
   }
 
+  function updateImagePreview(name, value) {
+    const preview = document.querySelector(`[data-image-preview="${name}"]`);
+    if (!preview) {
+      return;
+    }
+
+    preview.innerHTML = value ? `<img src="${attr(value)}" alt="">` : "<span>No image selected</span>";
+  }
+
   function renderDashboard() {
     setText("artist-count", state.artists.length);
     setText("gallery-count", state.galleries.length);
     setText("artwork-count", state.artwork.length);
+    setText("media-count", activeMedia().length);
     setText("published-count", state.artists.filter((artist) => artist.status === "published").length);
   }
 
@@ -195,7 +266,7 @@
       ${field("country", "Country", artist.country)}
       ${field("medium", "Medium", artist.medium)}
       ${field("category", "Category", artist.category)}
-      ${field("heroImage", "Hero Image", artist.heroImage)}
+      ${imageField("heroImage", "Hero Image", artist.heroImage)}
       ${field("contactEmail", "Contact Email", artist.contactEmail, "email")}
       ${field("website", "Website", artist.website)}
       ${field("socialLinks", "Instagram / Social Link", (artist.socialLinks || []).join(", "))}
@@ -246,7 +317,7 @@
       ${field("title", "Gallery Title", gallery.title)}
       ${field("slug", "Gallery Slug", gallery.slug)}
       ${select("artistId", "Associated Artist", gallery.artistId || artistOptions[0]?.value || "", artistOptions)}
-      ${field("coverImage", "Cover Image", gallery.coverImage)}
+      ${imageField("coverImage", "Cover Image", gallery.coverImage)}
       ${select("status", "Status", gallery.status || "draft", statusOptions.map((item) => ({ value: item, label: item })))}
       ${checkbox("featured", "Featured", gallery.featured)}
       ${field("displayOrder", "Display Order", gallery.displayOrder || 0, "number")}
@@ -301,7 +372,7 @@
       ${field("title", "Artwork Title", artwork.title)}
       ${select("artistId", "Artist", artwork.artistId || artistOptions[0]?.value || "", artistOptions)}
       ${select("galleryId", "Gallery", artwork.galleryId || galleryOptions[0]?.value || "", galleryOptions)}
-      ${field("image", "Image", artwork.image)}
+      ${imageField("image", "Artwork Image", artwork.image)}
       ${field("alt", "Alt Text", artwork.alt)}
       ${field("year", "Year", artwork.year)}
       ${field("location", "Location", artwork.location)}
@@ -343,11 +414,41 @@
     renderArtworkForm(state.artwork[0] || {});
   }
 
+  function renderMedia() {
+    const grid = document.getElementById("media-grid");
+    if (!grid) {
+      return;
+    }
+
+    const media = state.media.slice().sort((left, right) => String(right.uploadedAt || "").localeCompare(String(left.uploadedAt || "")));
+    if (!media.length) {
+      grid.innerHTML = '<p class="empty-state">No uploaded images yet.</p>';
+      return;
+    }
+
+    grid.innerHTML = media.map((item) => `
+      <article class="admin-media-card ${item.status === "archived" ? "archived" : ""}">
+        <img src="${attr(item.publicPath)}" alt="${attr(item.originalFilename)}">
+        <div>
+          <h3>${escapeHtml(item.originalFilename)}</h3>
+          <p>${escapeHtml(item.publicPath)}</p>
+          <p>${escapeHtml(item.mimeType)} · ${formatBytes(item.size)}${item.width && item.height ? ` · ${item.width}x${item.height}` : ""}</p>
+          <p>Uploaded ${formatDate(item.uploadedAt)} · ${badge(item.status)}</p>
+        </div>
+        <div class="admin-actions">
+          <button type="button" data-copy-path="${attr(item.publicPath)}">Copy Path</button>
+          <button type="button" data-archive-media="${attr(item.id)}"${item.status === "archived" ? " disabled" : ""}>Archive</button>
+        </div>
+      </article>
+    `).join("");
+  }
+
   function renderAll() {
     renderDashboard();
     renderArtists();
     renderGalleries();
     renderArtwork();
+    renderMedia();
   }
 
   function updateFromPayload(payload) {
@@ -367,7 +468,7 @@
     showMessage(payload.ok ? "success" : "error", payload.message || "Save failed.", payload.errors);
   }
 
-  async function archive(resource, id, endpoint) {
+  async function archive(id, endpoint) {
     if (!window.confirm("Archive this record? It will no longer appear publicly.")) {
       return;
     }
@@ -375,6 +476,24 @@
     const payload = await api(`${endpoint}/${encodeURIComponent(id)}/archive`, { method: "POST", body: "{}" });
     updateFromPayload(payload);
     showMessage(payload.ok ? "success" : "error", payload.message || "Archive failed.");
+  }
+
+  async function uploadMedia(form) {
+    const payload = await uploadApi("/admin/api/media/upload", new FormData(form));
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Upload failed.");
+    if (payload.ok) {
+      form.reset();
+    }
+  }
+
+  async function copyPath(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      showMessage("success", "Image path copied.");
+    } catch (error) {
+      window.prompt("Copy image path", value);
+    }
   }
 
   function bindEvents() {
@@ -385,6 +504,8 @@
       const artistArchive = event.target.closest("[data-archive-artist]");
       const galleryArchive = event.target.closest("[data-archive-gallery]");
       const artworkArchive = event.target.closest("[data-archive-artwork]");
+      const mediaArchive = event.target.closest("[data-archive-media]");
+      const copyButton = event.target.closest("[data-copy-path]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -396,13 +517,19 @@
         renderArtworkForm(state.artwork.find((artwork) => artwork.id === artworkEdit.dataset.editArtwork) || {});
       }
       if (artistArchive) {
-        archive("artist", artistArchive.dataset.archiveArtist, "/admin/api/artists");
+        archive(artistArchive.dataset.archiveArtist, "/admin/api/artists");
       }
       if (galleryArchive) {
-        archive("gallery", galleryArchive.dataset.archiveGallery, "/admin/api/galleries");
+        archive(galleryArchive.dataset.archiveGallery, "/admin/api/galleries");
       }
       if (artworkArchive) {
-        archive("artwork", artworkArchive.dataset.archiveArtwork, "/admin/api/artwork");
+        archive(artworkArchive.dataset.archiveArtwork, "/admin/api/artwork");
+      }
+      if (mediaArchive) {
+        archive(mediaArchive.dataset.archiveMedia, "/admin/api/media");
+      }
+      if (copyButton) {
+        copyPath(copyButton.dataset.copyPath);
       }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
@@ -415,9 +542,28 @@
       }
     });
 
+    document.addEventListener("change", (event) => {
+      const mediaSelect = event.target.closest("[data-media-select]");
+      if (mediaSelect?.value) {
+        const input = document.querySelector(`[name="${mediaSelect.dataset.mediaSelect}"]`);
+        if (input) {
+          input.value = mediaSelect.value;
+          updateImagePreview(mediaSelect.dataset.mediaSelect, mediaSelect.value);
+        }
+      }
+    });
+
+    document.addEventListener("input", (event) => {
+      const imageInput = event.target.closest("[data-image-input]");
+      if (imageInput) {
+        updateImagePreview(imageInput.dataset.imageInput, imageInput.value);
+      }
+    });
+
     const artistForm = document.getElementById("artist-form");
     const galleryForm = document.getElementById("gallery-form");
     const artworkForm = document.getElementById("artwork-form");
+    const mediaUploadForm = document.getElementById("media-upload-form");
 
     artistForm?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -432,6 +578,11 @@
     artworkForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       save("artwork", artworkForm, "/admin/api/artwork");
+    });
+
+    mediaUploadForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      uploadMedia(mediaUploadForm);
     });
   }
 
