@@ -244,6 +244,38 @@ a {
   padding-left: 18px;
 }
 
+.billing-checklist,
+.billing-plan-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+
+.billing-checklist article,
+.billing-plan-options article {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid rgba(185, 151, 77, .22);
+  background: rgba(255, 255, 255, .035);
+}
+
+.billing-checklist strong {
+  color: #f8f1e6;
+}
+
+.billing-checklist .is-complete strong {
+  color: #a5d6a7;
+}
+
+.billing-checklist .is-missing strong {
+  color: #f0c36a;
+}
+
+.billing-plan-options button {
+  width: fit-content;
+}
+
 .product-layout {
   display: grid;
   grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);

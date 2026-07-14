@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Billing Settings | The Galleria.Art Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-page">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <a class="brand-link" href="/">The Galleria.Art</a>
+      <nav class="admin-nav" aria-label="Admin navigation">
+        <a href="/admin/">Dashboard</a>
+        <a href="/admin/artists/">Artists</a>
+        <a href="/admin/plans/">Plans</a>
+        <a href="/admin/galleries/">Galleries</a>
+        <a href="/admin/artwork/">Artwork</a>
+        <a href="/admin/media/">Media</a>
+        <a href="/admin/inquiries/">Inquiries</a>
+        <a href="/admin/invitations/">Invitations</a>
+        <a href="/admin/review/">Review</a>
+        <a href="/admin/audit/">Audit</a>
+        <a href="/admin/settings/">Settings</a>
+      </nav>
+      <form action="/admin/logout" method="post">
+        <button class="admin-logout" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="admin-dashboard" aria-labelledby="billing-settings-title">
+      <div class="admin-dashboard-heading">
+        <div>
+          <p class="section-kicker">Stripe Readiness</p>
+          <h1 id="billing-settings-title">Billing Settings</h1>
+          <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
+        </div>
+      </div>
+
+      <section class="admin-panel">
+        <h2>Stripe Configuration</h2>
+        <div class="status-summary-grid" id="stripe-config-summary"></div>
+        <p class="admin-muted">Stripe is optional until configured. Keep test mode on until Checkout, Customer Portal, and webhooks have been verified.</p>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Readiness Checklist</h2>
+        <div class="billing-checklist" id="stripe-readiness-list"></div>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Webhook Setup</h2>
+        <div class="status-summary-grid">
+          <article>
+            <strong>Endpoint URL</strong>
+            <span id="stripe-webhook-endpoint">-</span>
+            <button type="button" id="copy-stripe-webhook-endpoint">Copy Endpoint</button>
+          </article>
+          <article>
+            <strong>Required Events</strong>
+            <span id="stripe-webhook-events">-</span>
+          </article>
+          <article>
+            <strong>Secrets</strong>
+            <span>Use environment variables only. Secret values are never displayed here.</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Recent Billing Events</h2>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Event</th>
+                <th>Artist</th>
+                <th>Status</th>
+                <th>Message</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody id="billing-events-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

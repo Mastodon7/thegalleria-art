@@ -1,6 +1,7 @@
 (function () {
   const statusOptions = ["draft", "pending_review", "approved", "published", "changes_requested", "archived"];
   const planStatusOptions = ["active", "draft", "archived"];
+  const billingIntervalOptions = ["monthly", "annual", "both"];
   const billingStatusOptions = ["trial", "active", "past_due", "canceled", "comped", "legacy", "demo", "not_configured"];
   const subscriptionStatusOptions = ["trialing", "active", "past_due", "canceled", "incomplete", "none", "not_configured"];
   const invitationOptions = ["current", "invited", "pending", "accepted", "none"];
@@ -15,6 +16,7 @@
     invitations: [],
     artistAccounts: [],
     notifications: [],
+    billingEvents: [],
     emailLog: [],
     auditLog: [],
     emailStatus: {},
@@ -357,6 +359,7 @@
     state.invitations = content.invitations || [];
     state.artistAccounts = content.artistAccounts || [];
     state.notifications = content.notifications || [];
+    state.billingEvents = content.billingEvents || [];
     state.emailLog = content.emailLog || [];
     state.auditLog = content.auditLog || [];
     state.emailStatus = content.emailStatus || {};
@@ -549,6 +552,7 @@
     setText("settings-billing-mode", `Billing mode: ${state.billingStatus.mode || "disabled"}`);
     setText("settings-default-plan", state.billingStatus.defaultPlanSlug || "-");
     setText("settings-trial-days", `${state.billingStatus.defaultTrialDays || 0} days`);
+    setText("settings-stripe-readiness", state.billingStatus.checkoutAvailable ? "Ready for Checkout" : "Not Ready");
 
     const list = document.getElementById("settings-email-log");
     if (list) {
@@ -567,6 +571,78 @@
           </div>
         </article>
       `).join("") : '<p class="empty-state">No email events have been recorded yet.</p>';
+    }
+  }
+
+  function renderBillingSettings() {
+    const summary = document.getElementById("stripe-config-summary");
+    if (!summary) {
+      return;
+    }
+
+    const status = state.billingStatus || {};
+    const envNames = status.requiredEnvironment || [];
+    summary.innerHTML = `
+      <article>
+        <strong>Mode</strong>
+        <span>${escapeHtml(status.mode || "disabled")}</span>
+        <p>Set with STRIPE_MODE. Live mode should wait until test Checkout and webhooks are verified.</p>
+      </article>
+      <article>
+        <strong>Publishable Key</strong>
+        <span>${status.publishableKeyConfigured ? `Configured (${escapeHtml(status.publishableKeyPreview || "set")})` : "Not configured"}</span>
+        <p>Environment: STRIPE_PUBLISHABLE_KEY</p>
+      </article>
+      <article>
+        <strong>Secret Key</strong>
+        <span>${status.secretKeyConfigured ? "Configured" : "Not configured"}</span>
+        <p>Environment: STRIPE_SECRET_KEY</p>
+      </article>
+      <article>
+        <strong>Webhook Secret</strong>
+        <span>${status.webhookSecretConfigured ? "Configured" : "Not configured"}</span>
+        <p>Environment: STRIPE_WEBHOOK_SECRET</p>
+      </article>
+      <article>
+        <strong>URLs</strong>
+        <span>Success, cancel, and portal return URLs are environment-driven.</span>
+        <p>${envNames.map(escapeHtml).join(", ")}</p>
+      </article>
+      <article>
+        <strong>Default Currency</strong>
+        <span>${escapeHtml(status.defaultCurrency || "USD")}</span>
+        <p>Environment: DEFAULT_CURRENCY</p>
+      </article>
+    `;
+
+    const checklist = document.getElementById("stripe-readiness-list");
+    if (checklist) {
+      checklist.innerHTML = (status.checklist || []).map((item) => `
+        <article class="${item.complete ? "is-complete" : "is-missing"}">
+          <strong>${item.complete ? "Ready" : "Missing"}</strong>
+          <span>${escapeHtml(item.label)}</span>
+        </article>
+      `).join("");
+    }
+
+    setText("stripe-webhook-endpoint", status.webhookEndpoint || "-");
+    setText("stripe-webhook-events", (status.requiredWebhookEvents || []).join(", ") || "-");
+
+    const table = document.getElementById("billing-events-table");
+    if (table) {
+      table.innerHTML = state.billingEvents.length ? state.billingEvents.map((event) => {
+        const artist = artistById(event.artistId);
+        return `
+          <tr>
+            <td>${escapeHtml(formatDateTime(event.createdAt))}</td>
+            <td>${escapeHtml(event.type)}</td>
+            <td>${escapeHtml(artist?.name || event.artistId || "-")}</td>
+            <td>${badge(event.status || "logged")}</td>
+            <td>${escapeHtml(event.message || "-")}</td>
+            <td>${escapeHtml(event.error || "-")}</td>
+          </tr>
+        `;
+      }).join("") : '<tr><td colspan="6">No billing events have been recorded yet.</td></tr>';
     }
   }
 
@@ -590,6 +666,14 @@
       ${field("mediaStorageLimit", "Media Storage Limit MB", plan.mediaStorageLimit || 250, "number")}
       ${checkbox("featuredGalleryEligible", "Featured Gallery Eligible", plan.featuredGalleryEligible)}
       ${checkbox("customDomainEligible", "Custom Domain Eligible", plan.customDomainEligible)}
+      ${field("stripeProductId", "Stripe Product ID", plan.stripeProductId)}
+      ${field("stripeMonthlyPriceId", "Stripe Monthly Price ID", plan.stripeMonthlyPriceId)}
+      ${field("stripeAnnualPriceId", "Stripe Annual Price ID", plan.stripeAnnualPriceId)}
+      ${field("stripeTestMonthlyPriceId", "Stripe Test Monthly Price ID", plan.stripeTestMonthlyPriceId)}
+      ${field("stripeTestAnnualPriceId", "Stripe Test Annual Price ID", plan.stripeTestAnnualPriceId)}
+      ${field("stripeLiveMonthlyPriceId", "Stripe Live Monthly Price ID", plan.stripeLiveMonthlyPriceId)}
+      ${field("stripeLiveAnnualPriceId", "Stripe Live Annual Price ID", plan.stripeLiveAnnualPriceId)}
+      ${select("billingInterval", "Billing Interval", plan.billingInterval || "monthly", billingIntervalOptions.map((item) => ({ value: item, label: item })))}
       ${select("status", "Status", plan.status || "active", planStatusOptions.map((item) => ({ value: item, label: item })))}
       ${field("displayOrder", "Display Order", plan.displayOrder || 0, "number")}
     `;
@@ -610,12 +694,13 @@
         <td>${plan.annualPrice ? `${escapeHtml(plan.currency || "USD")} ${Number(plan.annualPrice).toLocaleString()}` : "-"}</td>
         <td>${badge(plan.status || "draft")}</td>
         <td>${Number(plan.galleryLimit || 0)} galleries<br>${Number(plan.artworkLimit || 0)} artwork<br>${Number(plan.mediaStorageLimit || 0)} MB</td>
+        <td>${plan.stripeProductId ? "Product set" : "No product"}<br>${plan.stripeTestMonthlyPriceId || plan.stripeMonthlyPriceId ? "Test monthly set" : "No test monthly"}<br>${plan.stripeLiveMonthlyPriceId ? "Live monthly set" : "No live monthly"}</td>
         <td>${escapeHtml(plan.displayOrder)}</td>
         <td class="admin-actions">
           <button type="button" data-edit-plan="${attr(plan.id)}">Edit</button>
         </td>
       </tr>
-    `).join("") : '<tr><td colspan="8">No plans have been configured yet.</td></tr>';
+    `).join("") : '<tr><td colspan="9">No plans have been configured yet.</td></tr>';
 
     renderPlanForm(plans[0] || {});
   }
@@ -1118,6 +1203,7 @@
     renderInvitations();
     renderReview();
     renderSettings();
+    renderBillingSettings();
     renderAudit();
   }
 
@@ -1272,6 +1358,7 @@
       const notificationRead = event.target.closest("[data-read-notification]");
       const copyEmail = event.target.closest("[data-copy-email]");
       const planEdit = event.target.closest("[data-edit-plan]");
+      const copyStripeWebhook = event.target.closest("#copy-stripe-webhook-endpoint");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -1317,6 +1404,9 @@
       }
       if (copyEmail) {
         copyPath(copyEmail.dataset.copyEmail);
+      }
+      if (copyStripeWebhook) {
+        copyPath(state.billingStatus.webhookEndpoint || "");
       }
       if (planEdit) {
         renderPlanForm(state.plans.find((plan) => plan.id === planEdit.dataset.editPlan) || {});

@@ -24,9 +24,17 @@ const resendApiKey = process.env.RESEND_API_KEY || "";
 const analyticsProvider = process.env.ANALYTICS_PROVIDER || "";
 const analyticsId = process.env.ANALYTICS_ID || process.env.PLAUSIBLE_DOMAIN || "";
 const billingProvider = process.env.BILLING_PROVIDER || "none";
-const billingMode = process.env.BILLING_MODE || (process.env.STRIPE_SECRET_KEY ? "test" : "disabled");
+const stripePublishableKey = process.env.STRIPE_PUBLISHABLE_KEY || "";
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
+const stripeMode = process.env.STRIPE_MODE || process.env.BILLING_MODE || (stripeSecretKey ? "test" : "disabled");
+const billingMode = stripeMode;
+const defaultCurrency = (process.env.DEFAULT_CURRENCY || "USD").toUpperCase();
 const defaultTrialDays = Number(process.env.DEFAULT_TRIAL_DAYS || 14);
 const defaultPlanSlug = process.env.DEFAULT_PLAN_SLUG || "starter";
+const stripeSuccessUrl = process.env.STRIPE_SUCCESS_URL || `${publicSiteUrl}/artist/billing/?checkout=success`;
+const stripeCancelUrl = process.env.STRIPE_CANCEL_URL || `${publicSiteUrl}/artist/billing/?checkout=cancel`;
+const stripePortalReturnUrl = process.env.STRIPE_PORTAL_RETURN_URL || `${publicSiteUrl}/artist/billing/`;
 const passwordSalt = process.env.ADMIN_PASSWORD_SALT || "galleria-admin-bootstrap-v1";
 const passwordHash = process.env.ADMIN_PASSWORD_HASH ||
   "61a567bd15cf8240b460bb5199b408e73bf6fea3f93d529075a56be811e0b3d9eeb280e43bf340411d87355f2fc85a0dc23765e5644062cdcc875f738ea53ec2";
@@ -41,6 +49,14 @@ const validInquiryStatuses = new Set(["new", "reviewed", "replied", "archived", 
 const validArtistInvitationStatuses = new Set(["pending", "accepted", "expired", "revoked"]);
 const validBillingStatuses = new Set(["trial", "active", "past_due", "canceled", "comped", "legacy", "demo", "not_configured"]);
 const validSubscriptionStatuses = new Set(["trialing", "active", "past_due", "canceled", "incomplete", "none", "not_configured"]);
+const stripeWebhookEvents = [
+  "checkout.session.completed",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "invoice.payment_succeeded",
+  "invoice.payment_failed"
+];
 const inquiryRateLimit = new Map();
 const inquiryRateLimitWindowMs = 10 * 60 * 1000;
 const inquiryRateLimitMax = 6;
@@ -227,6 +243,7 @@ function normalizeContent(content) {
     inquiries: Array.isArray(content.inquiries) ? content.inquiries : [],
     invitations: Array.isArray(content.invitations) ? content.invitations : [],
     notifications: Array.isArray(content.notifications) ? content.notifications : [],
+    billingEvents: Array.isArray(content.billingEvents) ? content.billingEvents : [],
     emailLog: Array.isArray(content.emailLog) ? content.emailLog : [],
     passwordResetTokens: Array.isArray(content.passwordResetTokens) ? content.passwordResetTokens : [],
     adminAccounts: Array.isArray(content.adminAccounts) ? content.adminAccounts : [],
@@ -261,7 +278,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "plans", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts"].forEach((collection) => {
+  ["artists", "plans", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "billingEvents", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -343,17 +360,52 @@ function emailServiceStatus() {
 }
 
 function billingProviderStatus() {
-  const configured = Boolean(process.env.STRIPE_SECRET_KEY);
-  const mode = configured ? (billingMode === "live" ? "live" : "test") : "disabled";
+  const publishableConfigured = Boolean(stripePublishableKey);
+  const secretConfigured = Boolean(stripeSecretKey);
+  const webhookConfigured = Boolean(stripeWebhookSecret);
+  const selectedMode = ["disabled", "test", "live"].includes(stripeMode) ? stripeMode : "disabled";
+  const configured = Boolean(publishableConfigured && secretConfigured && selectedMode !== "disabled");
   return {
     configured,
     provider: configured ? (billingProvider === "none" ? "stripe" : billingProvider) : "none",
-    mode,
+    mode: configured ? selectedMode : "disabled",
+    publishableKeyConfigured: publishableConfigured,
+    secretKeyConfigured: secretConfigured,
+    webhookSecretConfigured: webhookConfigured,
+    publishableKeyPreview: publishableConfigured ? maskSecret(stripePublishableKey) : "",
+    webhookEndpoint: absoluteUrl("/api/stripe/webhook"),
     publicPricingVisible: true,
     defaultTrialDays,
     defaultPlanSlug,
+    defaultCurrency,
+    successUrl: stripeSuccessUrl,
+    cancelUrl: stripeCancelUrl,
+    portalReturnUrl: stripePortalReturnUrl,
+    requiredEnvironment: [
+      "STRIPE_PUBLISHABLE_KEY",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_MODE",
+      "STRIPE_SUCCESS_URL",
+      "STRIPE_CANCEL_URL",
+      "STRIPE_PORTAL_RETURN_URL",
+      "DEFAULT_CURRENCY",
+      "DEFAULT_TRIAL_DAYS"
+    ],
+    requiredWebhookEvents: stripeWebhookEvents,
     supportContactEmail: publicContactEmail
   };
+}
+
+function maskSecret(value) {
+  const secret = cleanString(value);
+  if (!secret) {
+    return "";
+  }
+  if (secret.length <= 10) {
+    return `${secret.slice(0, 3)}...`;
+  }
+  return `${secret.slice(0, 7)}...${secret.slice(-4)}`;
 }
 
 function activePlans(content) {
@@ -376,6 +428,61 @@ function defaultPlan(content) {
 
 function artistPlan(content, artist) {
   return planById(content, artist.planId) || defaultPlan(content);
+}
+
+function planStripePriceId(plan, interval = "monthly") {
+  if (!plan) {
+    return "";
+  }
+
+  const liveMode = billingMode === "live";
+  const annual = interval === "annual";
+  if (annual) {
+    return liveMode
+      ? cleanString(plan.stripeLiveAnnualPriceId || plan.stripeAnnualPriceId)
+      : cleanString(plan.stripeTestAnnualPriceId || plan.stripeAnnualPriceId);
+  }
+
+  return liveMode
+    ? cleanString(plan.stripeLiveMonthlyPriceId || plan.stripeMonthlyPriceId)
+    : cleanString(plan.stripeTestMonthlyPriceId || plan.stripeMonthlyPriceId);
+}
+
+function planHasStripePrice(plan) {
+  return Boolean(planStripePriceId(plan, "monthly") || planStripePriceId(plan, "annual"));
+}
+
+function stripeReadiness(content) {
+  const status = billingProviderStatus();
+  const active = activePlans(content);
+  const plansMapped = active.length > 0 && active.every((plan) => planHasStripePrice(plan));
+  const checklist = [
+    { key: "publishable_key", label: "Publishable key configured", complete: status.publishableKeyConfigured },
+    { key: "secret_key", label: "Secret key configured", complete: status.secretKeyConfigured },
+    { key: "webhook_secret", label: "Webhook signing secret configured", complete: status.webhookSecretConfigured },
+    { key: "mode", label: "Stripe mode selected", complete: status.mode === "test" || status.mode === "live" },
+    { key: "plans_mapped", label: "Active plans mapped to Stripe price IDs", complete: plansMapped },
+    { key: "webhook_endpoint", label: "Webhook endpoint configured in Stripe", complete: status.webhookSecretConfigured },
+    { key: "test_checkout", label: "Test checkout available", complete: status.mode === "test" && status.secretKeyConfigured && plansMapped },
+    { key: "live_checkout", label: "Live checkout enabled", complete: status.mode === "live" && status.secretKeyConfigured && plansMapped }
+  ];
+
+  return {
+    ...status,
+    activePlanCount: active.length,
+    mappedPlanCount: active.filter(planHasStripePrice).length,
+    checkoutAvailable: status.configured && active.some(planHasStripePrice),
+    portalAvailable: status.configured,
+    checklist
+  };
+}
+
+function artistPlanOption(plan) {
+  return {
+    ...plan,
+    checkoutMonthlyAvailable: Boolean(planStripePriceId(plan, "monthly")),
+    checkoutAnnualAvailable: Boolean(planStripePriceId(plan, "annual"))
+  };
 }
 
 function artistUsage(content, artistId) {
@@ -412,6 +519,7 @@ function usageWarnings(plan, usage) {
 function billingSnapshot(content, artist) {
   const plan = artistPlan(content, artist);
   const usage = artistUsage(content, artist.id);
+  const readiness = stripeReadiness(content);
   return {
     plan,
     usage,
@@ -423,7 +531,10 @@ function billingSnapshot(content, artist) {
     currentPeriodStart: artist.currentPeriodStart || "",
     currentPeriodEnd: artist.currentPeriodEnd || "",
     cancelAtPeriodEnd: Boolean(artist.cancelAtPeriodEnd),
-    providerStatus: billingProviderStatus()
+    externalCustomerConfigured: Boolean(artist.externalCustomerId),
+    providerStatus: readiness,
+    checkoutAvailable: readiness.checkoutAvailable && planHasStripePrice(plan),
+    portalAvailable: readiness.portalAvailable && Boolean(artist.externalCustomerId)
   };
 }
 
@@ -457,6 +568,21 @@ function addNotification(content, notification = {}) {
   });
 }
 
+function addBillingEvent(content, event = {}) {
+  content.billingEvents.push({
+    id: generateId("billing"),
+    type: cleanString(event.type || "billing.event"),
+    artistId: cleanString(event.artistId || ""),
+    accountEmail: cleanLimitedString(event.accountEmail || "", 180),
+    status: cleanString(event.status || "logged"),
+    message: cleanLimitedString(event.message || "", 700),
+    error: cleanLimitedString(event.error || "", 700),
+    provider: cleanString(event.provider || "stripe"),
+    providerEventId: cleanLimitedString(event.providerEventId || "", 180),
+    createdAt: nowIso()
+  });
+}
+
 function notificationSafe(notification) {
   return {
     id: notification.id,
@@ -476,6 +602,7 @@ function notificationSafe(notification) {
 function trimOperationalLogs(content) {
   content.emailLog = content.emailLog.slice(-250);
   content.notifications = content.notifications.slice(-500);
+  content.billingEvents = content.billingEvents.slice(-500);
   content.auditLog = content.auditLog.slice(-1000);
   content.passwordResetTokens = content.passwordResetTokens.filter((token) =>
     !token.usedAt && new Date(token.expiresAt).getTime() > Date.now() - 24 * 60 * 60 * 1000
@@ -1316,6 +1443,117 @@ function collectJson(request, response, callback) {
   });
 }
 
+async function stripeRequest(endpoint, params = {}) {
+  if (!stripeSecretKey) {
+    throw new Error("Stripe secret key is not configured.");
+  }
+
+  const body = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      body.append(key, String(value));
+    }
+  });
+
+  const response = await fetch(`https://api.stripe.com/v1${endpoint}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${stripeSecretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+  const text = await response.text();
+  let payload = {};
+
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch (error) {
+    payload = { error: { message: text || "Unexpected Stripe response." } };
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.error?.message || "Stripe request failed.");
+  }
+
+  return payload;
+}
+
+function verifyStripeSignature(body, signatureHeader) {
+  if (!stripeWebhookSecret) {
+    return { ok: false, message: "Stripe webhook secret is not configured." };
+  }
+
+  const parts = cleanString(signatureHeader).split(",").reduce((accumulator, part) => {
+    const [key, value] = part.split("=");
+    if (key && value) {
+      accumulator[key] = accumulator[key] || [];
+      accumulator[key].push(value);
+    }
+    return accumulator;
+  }, {});
+  const timestamp = parts.t?.[0];
+  const signatures = parts.v1 || [];
+
+  if (!timestamp || !signatures.length) {
+    return { ok: false, message: "Stripe signature header is missing required values." };
+  }
+
+  const ageSeconds = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!Number.isFinite(ageSeconds) || ageSeconds > 300) {
+    return { ok: false, message: "Stripe webhook timestamp is outside the allowed tolerance." };
+  }
+
+  const expected = crypto
+    .createHmac("sha256", stripeWebhookSecret)
+    .update(`${timestamp}.${body}`, "utf8")
+    .digest("hex");
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const match = signatures.some((signature) => {
+    const signatureBuffer = Buffer.from(signature, "hex");
+    return signatureBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+  });
+
+  return match ? { ok: true } : { ok: false, message: "Stripe webhook signature verification failed." };
+}
+
+function isoFromUnix(value) {
+  const timestamp = Number(value || 0);
+  return timestamp ? new Date(timestamp * 1000).toISOString() : "";
+}
+
+function billingStatusFromSubscriptionStatus(status) {
+  if (status === "trialing") {
+    return "trial";
+  }
+  if (status === "active") {
+    return "active";
+  }
+  if (status === "canceled" || status === "incomplete_expired") {
+    return "canceled";
+  }
+  if (["past_due", "unpaid", "incomplete"].includes(status)) {
+    return "past_due";
+  }
+  return "not_configured";
+}
+
+function findPlanByStripePrice(content, priceId) {
+  const id = cleanString(priceId);
+  if (!id) {
+    return null;
+  }
+
+  return content.plans.find((plan) => [
+    plan.stripeMonthlyPriceId,
+    plan.stripeAnnualPriceId,
+    plan.stripeTestMonthlyPriceId,
+    plan.stripeTestAnnualPriceId,
+    plan.stripeLiveMonthlyPriceId,
+    plan.stripeLiveAnnualPriceId
+  ].some((candidate) => cleanString(candidate) === id)) || null;
+}
+
 function cleanString(value) {
   return String(value || "").trim();
 }
@@ -1865,6 +2103,7 @@ function validatePlan(input, content, existing) {
   const status = cleanString(input.status || "active");
   const monthlyPrice = Number(input.monthlyPrice || 0);
   const annualPrice = Number(input.annualPrice || 0);
+  const billingInterval = cleanString(input.billingInterval || existing?.billingInterval || "monthly");
 
   if (!name) {
     errors.push("Plan name is required.");
@@ -1882,6 +2121,10 @@ function validatePlan(input, content, existing) {
     errors.push("Plan status is not valid.");
   }
 
+  if (!["monthly", "annual", "both"].includes(billingInterval)) {
+    errors.push("Billing interval is not valid.");
+  }
+
   if (monthlyPrice < 0 || annualPrice < 0) {
     errors.push("Plan prices cannot be negative.");
   }
@@ -1895,13 +2138,21 @@ function validatePlan(input, content, existing) {
       description: cleanLimitedString(input.description, 500),
       monthlyPrice,
       annualPrice,
-      currency: cleanString(input.currency || "USD").toUpperCase(),
+      currency: cleanString(input.currency || defaultCurrency).toUpperCase(),
       artistLimit: Number(input.artistLimit || 1),
       galleryLimit: Number(input.galleryLimit || 1),
       artworkLimit: Number(input.artworkLimit || 12),
       mediaStorageLimit: Number(input.mediaStorageLimit || 250),
       featuredGalleryEligible: parseBoolean(input.featuredGalleryEligible),
       customDomainEligible: parseBoolean(input.customDomainEligible),
+      stripeProductId: cleanString(input.stripeProductId || existing?.stripeProductId),
+      stripeMonthlyPriceId: cleanString(input.stripeMonthlyPriceId || existing?.stripeMonthlyPriceId),
+      stripeAnnualPriceId: cleanString(input.stripeAnnualPriceId || existing?.stripeAnnualPriceId),
+      stripeTestMonthlyPriceId: cleanString(input.stripeTestMonthlyPriceId || existing?.stripeTestMonthlyPriceId),
+      stripeTestAnnualPriceId: cleanString(input.stripeTestAnnualPriceId || existing?.stripeTestAnnualPriceId),
+      stripeLiveMonthlyPriceId: cleanString(input.stripeLiveMonthlyPriceId || existing?.stripeLiveMonthlyPriceId),
+      stripeLiveAnnualPriceId: cleanString(input.stripeLiveAnnualPriceId || existing?.stripeLiveAnnualPriceId),
+      billingInterval,
       status,
       displayOrder: Number(input.displayOrder || 0),
       createdAt: existing?.createdAt || nowIso(),
@@ -3598,13 +3849,14 @@ function publicSafeContent(content) {
   return {
     ...safeContent,
     emailStatus: emailServiceStatus(),
-    billingStatus: billingProviderStatus(),
+    billingStatus: stripeReadiness(content),
     artistBilling: content.artists.map((artist) => ({
       artistId: artist.id,
       plan: artistPlan(content, artist),
       usage: artistUsage(content, artist.id),
       warnings: usageWarnings(artistPlan(content, artist), artistUsage(content, artist.id))
     })),
+    billingEvents: (content.billingEvents || []).slice(-100).reverse(),
     adminAccounts: (adminAccounts || []).map((account) => ({
       id: account.id,
       email: account.email,
@@ -3712,7 +3964,7 @@ function buildArtistPortalContent(context) {
       lastLoginAt: context.account.lastLoginAt
     },
     artist: context.artist,
-    plans: activePlans(context.content),
+    plans: activePlans(context.content).map(artistPlanOption),
     billing: billingSnapshot(context.content, context.artist),
     galleries,
     artwork,
@@ -3755,6 +4007,281 @@ function markNotificationRead(content, id, scope = {}) {
 
   notification.readAt = notification.readAt || nowIso();
   return { ok: true, statusCode: 200, message: "Notification marked as read.", notification };
+}
+
+async function createStripeCheckoutForArtist(context, input = {}) {
+  const content = loadContent();
+  const artist = content.artists.find((item) => item.id === context.artist.id);
+  const account = content.artistAccounts.find((item) => item.artistId === context.artist.id && item.email === context.account.email);
+  const plan = planById(content, cleanString(input.planId)) || artistPlan(content, artist);
+  const interval = cleanString(input.interval) === "annual" ? "annual" : "monthly";
+  const readiness = stripeReadiness(content);
+  const priceId = planStripePriceId(plan, interval);
+
+  if (!artist || !account) {
+    return { ok: false, statusCode: 401, message: "Artist login required." };
+  }
+
+  if (!readiness.checkoutAvailable) {
+    return { ok: false, statusCode: 400, message: "Online billing is not enabled yet. Please contact The Galleria.Art." };
+  }
+
+  if (!priceId) {
+    return { ok: false, statusCode: 422, message: "This plan does not have a Stripe price ID yet." };
+  }
+
+  try {
+    const session = await stripeRequest("/checkout/sessions", {
+      mode: "subscription",
+      success_url: stripeSuccessUrl,
+      cancel_url: stripeCancelUrl,
+      customer: artist.externalCustomerId || "",
+      customer_email: artist.externalCustomerId ? "" : account.email,
+      client_reference_id: artist.id,
+      "line_items[0][price]": priceId,
+      "line_items[0][quantity]": 1,
+      "metadata[artistId]": artist.id,
+      "metadata[accountEmail]": account.email,
+      "metadata[planId]": plan.id,
+      "metadata[interval]": interval,
+      "subscription_data[metadata][artistId]": artist.id,
+      "subscription_data[metadata][planId]": plan.id
+    });
+
+    addBillingEvent(content, {
+      type: "checkout.session.created",
+      artistId: artist.id,
+      accountEmail: account.email,
+      status: "created",
+      message: `Created Stripe Checkout session for ${plan.name}.`,
+      providerEventId: session.id
+    });
+    addAuditEvent(content, {
+      actorType: "artist",
+      actorId: account.email,
+      action: "checkout.session.created",
+      targetType: "artist",
+      targetId: artist.id,
+      summary: `Created Stripe Checkout session for ${artist.name}`
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "stripe-checkout-session");
+    return { ok: true, statusCode: 200, message: "Checkout session created.", redirectUrl: session.url };
+  } catch (error) {
+    addBillingEvent(content, {
+      type: "checkout.session.error",
+      artistId: artist.id,
+      accountEmail: account.email,
+      status: "error",
+      message: "Stripe Checkout session could not be created.",
+      error: error.message
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "stripe-checkout-error");
+    return { ok: false, statusCode: 502, message: error.message || "Stripe Checkout is not available." };
+  }
+}
+
+async function createStripePortalForArtist(context) {
+  const content = loadContent();
+  const artist = content.artists.find((item) => item.id === context.artist.id);
+  const account = content.artistAccounts.find((item) => item.artistId === context.artist.id && item.email === context.account.email);
+  const readiness = stripeReadiness(content);
+
+  if (!artist || !account) {
+    return { ok: false, statusCode: 401, message: "Artist login required." };
+  }
+
+  if (!readiness.portalAvailable || !artist.externalCustomerId) {
+    return { ok: false, statusCode: 400, message: "Manage Billing is not available yet. Please contact The Galleria.Art." };
+  }
+
+  try {
+    const session = await stripeRequest("/billing_portal/sessions", {
+      customer: artist.externalCustomerId,
+      return_url: stripePortalReturnUrl
+    });
+    addBillingEvent(content, {
+      type: "billing_portal.session.created",
+      artistId: artist.id,
+      accountEmail: account.email,
+      status: "created",
+      message: "Created Stripe Customer Portal session.",
+      providerEventId: session.id
+    });
+    addAuditEvent(content, {
+      actorType: "artist",
+      actorId: account.email,
+      action: "billing_portal.session.created",
+      targetType: "artist",
+      targetId: artist.id,
+      summary: `Created Stripe Customer Portal session for ${artist.name}`
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "stripe-portal-session");
+    return { ok: true, statusCode: 200, message: "Customer portal session created.", redirectUrl: session.url };
+  } catch (error) {
+    addBillingEvent(content, {
+      type: "billing_portal.session.error",
+      artistId: artist.id,
+      accountEmail: account.email,
+      status: "error",
+      message: "Stripe Customer Portal session could not be created.",
+      error: error.message
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "stripe-portal-error");
+    return { ok: false, statusCode: 502, message: error.message || "Stripe Customer Portal is not available." };
+  }
+}
+
+function findArtistForStripeObject(content, object = {}) {
+  const metadata = object.metadata || {};
+  const artistId = cleanString(metadata.artistId || object.client_reference_id);
+  if (artistId) {
+    const artist = content.artists.find((item) => item.id === artistId);
+    if (artist) {
+      return artist;
+    }
+  }
+
+  const customerId = cleanString(object.customer);
+  const subscriptionId = cleanString(object.subscription || object.id);
+  return content.artists.find((artist) =>
+    (customerId && artist.externalCustomerId === customerId) ||
+    (subscriptionId && artist.externalSubscriptionId === subscriptionId)
+  ) || null;
+}
+
+function applyStripeSubscriptionToArtist(content, artist, subscription = {}) {
+  if (!artist) {
+    return;
+  }
+
+  const priceId = subscription.items?.data?.[0]?.price?.id || "";
+  const matchedPlan = findPlanByStripePrice(content, priceId);
+  const subscriptionStatus = cleanString(subscription.status || "none");
+
+  artist.externalCustomerId = cleanString(subscription.customer || artist.externalCustomerId);
+  artist.externalSubscriptionId = cleanString(subscription.id || artist.externalSubscriptionId);
+  artist.subscriptionStatus = hasValidSubscriptionStatus(subscriptionStatus) ? subscriptionStatus : "none";
+  artist.billingStatus = billingStatusFromSubscriptionStatus(subscriptionStatus);
+  artist.currentPeriodStart = isoFromUnix(subscription.current_period_start);
+  artist.currentPeriodEnd = isoFromUnix(subscription.current_period_end);
+  artist.cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end);
+  artist.trialStartAt = isoFromUnix(subscription.trial_start) || artist.trialStartAt || "";
+  artist.trialEndAt = isoFromUnix(subscription.trial_end) || artist.trialEndAt || "";
+  artist.planId = matchedPlan?.id || artist.planId;
+  artist.updatedAt = nowIso();
+}
+
+function handleStripeWebhookEvent(content, event) {
+  const object = event?.data?.object || {};
+  let artist = findArtistForStripeObject(content, object);
+  let status = "received";
+  let message = `Received ${event.type}.`;
+
+  if (event.type === "checkout.session.completed") {
+    artist = artist || findArtistForStripeObject(content, {
+      ...object,
+      metadata: object.metadata || {},
+      client_reference_id: object.client_reference_id
+    });
+    if (artist) {
+      artist.externalCustomerId = cleanString(object.customer || artist.externalCustomerId);
+      artist.externalSubscriptionId = cleanString(object.subscription || artist.externalSubscriptionId);
+      const plan = planById(content, cleanString(object.metadata?.planId));
+      artist.planId = plan?.id || artist.planId;
+      artist.billingStatus = object.payment_status === "paid" ? "active" : artist.billingStatus || "trial";
+      artist.subscriptionStatus = object.subscription ? "active" : artist.subscriptionStatus || "none";
+      artist.updatedAt = nowIso();
+      status = "updated";
+      message = `Checkout completed for ${artist.name}.`;
+    }
+  }
+
+  if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"].includes(event.type)) {
+    if (artist) {
+      applyStripeSubscriptionToArtist(content, artist, object);
+      status = "updated";
+      message = `Subscription ${cleanString(object.status || "updated")} for ${artist.name}.`;
+    }
+  }
+
+  if (event.type === "invoice.payment_succeeded" && artist) {
+    artist.billingStatus = "active";
+    artist.subscriptionStatus = artist.subscriptionStatus === "trialing" ? "active" : artist.subscriptionStatus || "active";
+    artist.updatedAt = nowIso();
+    status = "updated";
+    message = `Invoice payment succeeded for ${artist.name}.`;
+  }
+
+  if (event.type === "invoice.payment_failed" && artist) {
+    artist.billingStatus = "past_due";
+    artist.subscriptionStatus = "past_due";
+    artist.updatedAt = nowIso();
+    status = "updated";
+    message = `Invoice payment failed for ${artist.name}.`;
+  }
+
+  addBillingEvent(content, {
+    type: event.type,
+    artistId: artist?.id || "",
+    accountEmail: artist?.contactEmail || "",
+    status,
+    message,
+    providerEventId: event.id
+  });
+  addAuditEvent(content, {
+    actorType: "stripe",
+    actorId: "stripe",
+    action: "stripe.webhook.received",
+    targetType: artist ? "artist" : "billing",
+    targetId: artist?.id || event.id || "",
+    summary: message,
+    metadata: {
+      eventId: event.id || "",
+      eventType: event.type || ""
+    }
+  });
+}
+
+function handleStripeWebhook(request, response) {
+  if (request.method !== "POST") {
+    sendJson(response, 405, { ok: false, message: "Method not allowed." });
+    return;
+  }
+
+  collectBody(request, (body) => {
+    const verification = verifyStripeSignature(body, request.headers["stripe-signature"]);
+    const content = loadContent();
+
+    if (!verification.ok) {
+      addBillingEvent(content, {
+        type: "stripe.webhook.rejected",
+        status: "rejected",
+        message: "Rejected Stripe webhook.",
+        error: verification.message
+      });
+      trimOperationalLogs(content);
+      saveContent(content, "stripe-webhook-rejected");
+      sendJson(response, 400, { ok: false, message: verification.message });
+      return;
+    }
+
+    let event;
+    try {
+      event = JSON.parse(body);
+    } catch (error) {
+      sendJson(response, 400, { ok: false, message: "Invalid Stripe webhook JSON." });
+      return;
+    }
+
+    handleStripeWebhookEvent(content, event);
+    trimOperationalLogs(content);
+    saveContent(content, "stripe-webhook");
+    sendJson(response, 200, { ok: true, received: true });
+  });
 }
 
 function exportPublicContent(content) {
@@ -3966,7 +4493,7 @@ function updateArtistArtwork(context, id, input) {
   return { ok: true, statusCode: 200, message: "Artwork saved.", context: { ...context, content } };
 }
 
-function handleArtistApi(request, response, pathname) {
+async function handleArtistApi(request, response, pathname) {
   const context = requireArtistForApi(request, response);
   if (!context) {
     return;
@@ -3974,6 +4501,30 @@ function handleArtistApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/artist/api/content") {
     sendArtistPortalContent(response, context);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/artist/api/billing/checkout") {
+    collectJson(request, response, async (input) => {
+      const result = await createStripeCheckoutForArtist(context, input);
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        redirectUrl: result.redirectUrl || "",
+        content: buildArtistPortalContent(result.context || context)
+      });
+    });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/artist/api/billing/portal") {
+    const result = await createStripePortalForArtist(context);
+    sendJson(response, result.statusCode, {
+      ok: result.ok,
+      message: result.message,
+      redirectUrl: result.redirectUrl || "",
+      content: buildArtistPortalContent(context)
+    });
     return;
   }
 
@@ -4435,6 +4986,11 @@ function handleRequest(request, response) {
 
   if (request.method === "POST" && pathname === "/api/inquiries") {
     handlePublicInquiry(request, response);
+    return;
+  }
+
+  if (pathname === "/api/stripe/webhook") {
+    handleStripeWebhook(request, response);
     return;
   }
 

@@ -527,6 +527,11 @@
     return `<p><strong>${escapeHtml(label)}</strong> ${current.toLocaleString()}${cap ? ` / ${cap.toLocaleString()}` : ""}</p>`;
   }
 
+  function formatPlanPrice(plan) {
+    const amount = Number(plan?.monthlyPrice || 0);
+    return amount ? `${escapeHtml(plan.currency || "USD")} ${amount.toLocaleString()} / month` : "By invitation";
+  }
+
   function renderBilling() {
     const panel = document.getElementById("artist-billing-panel");
     if (!panel) {
@@ -537,6 +542,8 @@
     const plan = billing.plan || {};
     const usage = billing.usage || {};
     const provider = billing.providerStatus || {};
+    const billingEnabled = Boolean(provider.configured);
+    const planOptions = state.plans.length ? state.plans : (plan.id ? [plan] : []);
     panel.innerHTML = `
       <div class="status-summary-grid">
         <article>
@@ -553,14 +560,29 @@
         </article>
         <article>
           <strong>Billing</strong>
-          <p>${provider.configured ? `Billing provider is in ${escapeHtml(provider.mode)} mode.` : "Billing is not yet enabled. Account access is currently managed by The Galleria.Art."}</p>
+          <p>${provider.configured ? `Stripe is configured in ${escapeHtml(provider.mode)} mode.` : "Online billing is not enabled yet. Please contact The Galleria.Art."}</p>
           ${billing.trialEndAt ? `<p>Trial ends ${escapeHtml(formatDate(billing.trialEndAt))}</p>` : ""}
           ${billing.cancelAtPeriodEnd ? "<p>Cancellation is scheduled at period end.</p>" : ""}
         </article>
       </div>
+      <div class="review-note-block">
+        <strong>Plan Options</strong>
+        <div class="billing-plan-options">
+          ${planOptions.map((option) => `
+            <article>
+              <strong>${escapeHtml(option.name)}</strong>
+              <span>${formatPlanPrice(option)}</span>
+              <p>${escapeHtml(option.description || "")}</p>
+              <button type="button" data-billing-checkout="${attr(option.id)}" data-billing-interval="monthly" ${billingEnabled && option.checkoutMonthlyAvailable ? "" : "disabled"}>${billingEnabled && option.checkoutMonthlyAvailable ? "Start Monthly Checkout" : "Checkout Unavailable"}</button>
+              ${option.annualPrice ? `<button type="button" data-billing-checkout="${attr(option.id)}" data-billing-interval="annual" ${billingEnabled && option.checkoutAnnualAvailable ? "" : "disabled"}>${billingEnabled && option.checkoutAnnualAvailable ? "Start Annual Checkout" : "Annual Checkout Unavailable"}</button>` : ""}
+            </article>
+          `).join("")}
+        </div>
+        ${billingEnabled ? "" : "<p>Online billing is not enabled yet. Please contact The Galleria.Art.</p>"}
+      </div>
       ${billing.warnings?.length ? `<div class="review-note-block"><strong>Usage notices</strong>${billing.warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}</div>` : ""}
       <div class="review-status-actions">
-        <button type="button" disabled>Change Plan</button>
+        <button type="button" data-billing-portal ${billing.portalAvailable ? "" : "disabled"}>Manage Billing</button>
         <a href="/contact/">Contact About Billing</a>
       </div>
     `;
@@ -862,6 +884,34 @@
     showMessage(payload.ok ? "success" : "error", payload.message || "Notification update failed.");
   }
 
+  async function startCheckout(planId, interval) {
+    const payload = await api("/artist/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ planId, interval })
+    });
+    if (payload.content) {
+      applyContent(payload.content);
+      renderAll();
+    }
+    if (payload.ok && payload.redirectUrl) {
+      window.location.href = payload.redirectUrl;
+      return;
+    }
+    showMessage("error", payload.message || "Online billing is not enabled yet.");
+  }
+
+  async function openBillingPortal() {
+    const payload = await api("/artist/api/billing/portal", {
+      method: "POST",
+      body: "{}"
+    });
+    if (payload.ok && payload.redirectUrl) {
+      window.location.href = payload.redirectUrl;
+      return;
+    }
+    showMessage("error", payload.message || "Manage Billing is not available yet.");
+  }
+
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const galleryEdit = event.target.closest("[data-artist-edit-gallery]");
@@ -869,6 +919,8 @@
       const inquiryView = event.target.closest("[data-artist-view-inquiry]");
       const reviewSubmit = event.target.closest("[data-submit-review-type]");
       const notificationRead = event.target.closest("[data-artist-read-notification]");
+      const checkout = event.target.closest("[data-billing-checkout]");
+      const portal = event.target.closest("[data-billing-portal]");
 
       if (galleryEdit) {
         renderGalleryForm(state.galleries.find((gallery) => gallery.id === galleryEdit.dataset.artistEditGallery));
@@ -888,6 +940,14 @@
 
       if (notificationRead) {
         markNotificationRead(notificationRead.dataset.artistReadNotification);
+      }
+
+      if (checkout) {
+        startCheckout(checkout.dataset.billingCheckout, checkout.dataset.billingInterval || "monthly");
+      }
+
+      if (portal) {
+        openBillingPortal();
       }
     });
 

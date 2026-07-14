@@ -71,12 +71,18 @@ Phase 13 adds `/sitemap.xml`, `/robots.txt`, richer public metadata, admin-only 
 Phase 14 adds public pricing at `/pricing/`, protected plan management at `/admin/plans/`, and artist billing status at `/artist/billing/`. Billing remains configuration-ready and does not collect payments unless provider setup is intentionally added.
 
 - `BILLING_PROVIDER`: optional provider name, defaults to `none`.
-- `BILLING_MODE`: `disabled`, `test`, or `live`; defaults to `disabled` unless a Stripe secret is present.
-- `STRIPE_SECRET_KEY`: marks Stripe as configured for future test/live integration. No checkout or webhook processing is enabled by this variable alone.
+- `STRIPE_MODE`: `disabled`, `test`, or `live`; defaults to `disabled` unless a Stripe secret is present.
+- `STRIPE_PUBLISHABLE_KEY`: public Stripe key status shown in admin.
+- `STRIPE_SECRET_KEY`: server-side Stripe API key for test/live Checkout and Customer Portal sessions.
+- `STRIPE_WEBHOOK_SECRET`: server-side webhook signing secret for `/api/stripe/webhook`.
+- `STRIPE_SUCCESS_URL`: Checkout success return URL.
+- `STRIPE_CANCEL_URL`: Checkout cancel return URL.
+- `STRIPE_PORTAL_RETURN_URL`: Customer Portal return URL.
+- `DEFAULT_CURRENCY`: default plan currency, defaults to `USD`.
 - `DEFAULT_TRIAL_DAYS`: default trial display value, defaults to `14`.
 - `DEFAULT_PLAN_SLUG`: default plan assignment fallback, defaults to `starter`.
 
-Live checkout and signed payment webhooks are future work. Until then, account access and plan changes are managed by The Galleria.Art through the admin tools.
+Phase 15 adds `/admin/billing/settings/`, Stripe readiness checks, plan Stripe price ID mapping fields, test/live Checkout session structure, Customer Portal session structure, and a signed webhook endpoint. Online billing remains disabled when Stripe keys or plan price IDs are missing. Live mode should only be used after test mode, Checkout, Customer Portal, and webhook handling have been verified in Stripe.
 
 ## Artist portal demo
 
