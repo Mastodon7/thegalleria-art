@@ -1953,6 +1953,11 @@ function protectAdminRoute(request, response, pathname) {
 
   const normalizedPath = path.normalize(requestedPath);
   let absolutePath = path.join(publicDir, normalizedPath);
+  const artistWorkspaceMatch = requestedPath.match(/^admin\/artists\/[^/]+(?:\/.*)?$/);
+
+  if (artistWorkspaceMatch) {
+    absolutePath = path.join(publicDir, "admin", "artist-workspace", "index.html");
+  }
 
   if (absolutePath !== publicDir && !absolutePath.startsWith(`${publicDir}${path.sep}`)) {
     response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
@@ -3471,6 +3476,172 @@ function archiveRecord(resource, id) {
     ok: true,
     statusCode: 200,
     message: "Record archived successfully.",
+    content
+  };
+}
+
+function updateArtistBilling(id, input, session) {
+  const content = loadContent();
+  const artist = content.artists.find((item) => item.id === id);
+  const hasField = (name) => Object.prototype.hasOwnProperty.call(input, name);
+
+  if (!artist) {
+    return { ok: false, statusCode: 404, message: "Artist was not found." };
+  }
+
+  const planId = cleanString(hasField("planId") ? input.planId : artist.planId);
+  const plan = planId ? planById(content, planId) : null;
+  const billingStatus = cleanString(input.billingStatus || artist.billingStatus || "not_configured");
+  const subscriptionStatus = cleanString(input.subscriptionStatus || artist.subscriptionStatus || "not_configured");
+  const errors = [];
+
+  if (planId && !plan) {
+    errors.push("Selected billing plan was not found.");
+  }
+
+  if (!hasValidBillingStatus(billingStatus)) {
+    errors.push("Billing status is not valid.");
+  }
+
+  if (!hasValidSubscriptionStatus(subscriptionStatus)) {
+    errors.push("Subscription status is not valid.");
+  }
+
+  if (errors.length) {
+    return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors, content };
+  }
+
+  const previous = {
+    planId: artist.planId || "",
+    billingStatus: artist.billingStatus || "",
+    subscriptionStatus: artist.subscriptionStatus || "",
+    ignoreLimits: Boolean(artist.ignoreLimits),
+    customGalleryLimit: Number(artist.customGalleryLimit || 0),
+    customArtworkLimit: Number(artist.customArtworkLimit || 0),
+    customMediaLimit: Number(artist.customMediaLimit || 0),
+    customStorageLimit: Number(artist.customStorageLimit || 0),
+    limitOverrideNotes: cleanString(artist.limitOverrideNotes)
+  };
+
+  Object.assign(artist, {
+    planId,
+    billingStatus,
+    subscriptionStatus,
+    trialStartAt: cleanString(hasField("trialStartAt") ? input.trialStartAt : artist.trialStartAt),
+    trialEndAt: cleanString(hasField("trialEndAt") ? input.trialEndAt : artist.trialEndAt),
+    currentPeriodStart: cleanString(hasField("currentPeriodStart") ? input.currentPeriodStart : artist.currentPeriodStart),
+    currentPeriodEnd: cleanString(hasField("currentPeriodEnd") ? input.currentPeriodEnd : artist.currentPeriodEnd),
+    cancelAtPeriodEnd: parseBoolean(input.cancelAtPeriodEnd ?? artist.cancelAtPeriodEnd),
+    externalCustomerId: cleanString(hasField("externalCustomerId") ? input.externalCustomerId : artist.externalCustomerId),
+    externalSubscriptionId: cleanString(hasField("externalSubscriptionId") ? input.externalSubscriptionId : artist.externalSubscriptionId),
+    ignoreLimits: parseBoolean(input.ignoreLimits ?? artist.ignoreLimits),
+    customGalleryLimit: Number(input.customGalleryLimit || 0),
+    customArtworkLimit: Number(input.customArtworkLimit || 0),
+    customMediaLimit: Number(input.customMediaLimit || 0),
+    customStorageLimit: Number(input.customStorageLimit || 0),
+    limitOverrideNotes: cleanLimitedString(input.limitOverrideNotes || "", 700),
+    updatedAt: nowIso()
+  });
+
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: session?.email || adminEmail,
+    action: "artist.billing.updated",
+    targetType: "artist",
+    targetId: artist.id,
+    summary: `Billing updated for ${artist.name}`,
+    metadata: {
+      previous,
+      next: {
+        planId: artist.planId || "",
+        billingStatus: artist.billingStatus || "",
+        subscriptionStatus: artist.subscriptionStatus || "",
+        ignoreLimits: Boolean(artist.ignoreLimits),
+        customGalleryLimit: Number(artist.customGalleryLimit || 0),
+        customArtworkLimit: Number(artist.customArtworkLimit || 0),
+        customMediaLimit: Number(artist.customMediaLimit || 0),
+        customStorageLimit: Number(artist.customStorageLimit || 0),
+        limitOverrideNotes: cleanString(artist.limitOverrideNotes)
+      }
+    }
+  });
+
+  addNotification(content, {
+    audience: "artist",
+    artistId: artist.id,
+    type: "plan_changed",
+    title: "Billing status updated",
+    message: "Your plan, subscription, or account limits were updated by The Galleria.Art.",
+    link: "/artist/billing/",
+    relatedType: "artist",
+    relatedId: artist.id
+  });
+  addLimitThresholdNotifications(content, artist, usageEvaluation(content, artist));
+  trimOperationalLogs(content);
+  saveContent(content, "artist-billing-save");
+
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Artist billing saved.",
+    content
+  };
+}
+
+function reorderPortfolioPages(artistId, portfolioId, input, session) {
+  const content = loadContent();
+  const artist = content.artists.find((item) => item.id === artistId);
+  const portfolio = content.galleries.find((item) => item.id === portfolioId && item.artistId === artistId);
+  const orderedIds = Array.isArray(input.orderedIds) ? input.orderedIds.map(cleanString).filter(Boolean) : [];
+
+  if (!artist) {
+    return { ok: false, statusCode: 404, message: "Artist was not found." };
+  }
+
+  if (!portfolio) {
+    return { ok: false, statusCode: 404, message: "Portfolio was not found." };
+  }
+
+  const scopedPages = content.portfolioPages
+    .filter((page) => page.artistId === artistId && page.galleryId === portfolioId && page.status !== "archived")
+    .sort(sortByDisplayOrder);
+  const scopedIds = new Set(scopedPages.map((page) => page.id));
+  const uniqueOrderedIds = [...new Set(orderedIds)];
+
+  if (uniqueOrderedIds.length !== orderedIds.length || uniqueOrderedIds.some((id) => !scopedIds.has(id)) || uniqueOrderedIds.length !== scopedPages.length) {
+    return {
+      ok: false,
+      statusCode: 422,
+      message: "Page order must include each page in this portfolio exactly once.",
+      content
+    };
+  }
+
+  uniqueOrderedIds.forEach((id, index) => {
+    const page = content.portfolioPages.find((item) => item.id === id);
+    page.displayOrder = (index + 1) * 10;
+    page.updatedAt = nowIso();
+  });
+
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId: session?.email || adminEmail,
+    action: "portfolioPage.reordered",
+    targetType: "gallery",
+    targetId: portfolio.id,
+    summary: `Pages reordered for ${artist.name} / ${portfolio.title}`,
+    metadata: {
+      artistId: artist.id,
+      orderedIds: uniqueOrderedIds
+    }
+  });
+  trimOperationalLogs(content);
+  saveContent(content, "portfolio-page-reorder");
+
+  return {
+    ok: true,
+    statusCode: 200,
+    message: "Portfolio page order saved.",
     content
   };
 }
@@ -6262,6 +6433,38 @@ function handleAdminApi(request, response, pathname) {
   if (request.method === "POST" && supportStartMatch) {
     collectJson(request, response, (input) => {
       startSupportSession(request, response, decodeURIComponent(supportStartMatch[1]), adminSession, input);
+    });
+    return;
+  }
+
+  const artistBillingMatch = pathname.match(/^\/admin\/api\/artists\/([^/]+)\/billing$/);
+  if (request.method === "POST" && artistBillingMatch) {
+    collectJson(request, response, (input) => {
+      const result = updateArtistBilling(decodeURIComponent(artistBillingMatch[1]), input, adminSession);
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        errors: result.errors || [],
+        content: publicSafeContent(result.content || loadContent())
+      });
+    });
+    return;
+  }
+
+  const portfolioReorderMatch = pathname.match(/^\/admin\/api\/artists\/([^/]+)\/portfolios\/([^/]+)\/pages\/reorder$/);
+  if (request.method === "POST" && portfolioReorderMatch) {
+    collectJson(request, response, (input) => {
+      const result = reorderPortfolioPages(
+        decodeURIComponent(portfolioReorderMatch[1]),
+        decodeURIComponent(portfolioReorderMatch[2]),
+        input,
+        adminSession
+      );
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        content: publicSafeContent(result.content || loadContent())
+      });
     });
     return;
   }

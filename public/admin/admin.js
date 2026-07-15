@@ -142,6 +142,11 @@
     return `${bytes} B`;
   }
 
+  function sortByDisplayOrder(left, right) {
+    return Number(left.displayOrder || 0) - Number(right.displayOrder || 0) ||
+      String(left.title || left.name || "").localeCompare(String(right.title || right.name || ""));
+  }
+
   function artistById(id) {
     return state.artists.find((artist) => artist.id === id);
   }
@@ -1034,8 +1039,8 @@
     `;
   }
 
-  function renderArtistForm(artist = {}) {
-    const form = document.getElementById("artist-form");
+  function renderArtistForm(artist = {}, formId = "artist-form") {
+    const form = document.getElementById(formId);
     if (!form) {
       return;
     }
@@ -1119,28 +1124,22 @@
       return `
         <tr>
           <td>${escapeHtml(artist.name)}${artist.demo ? " <span class=\"admin-badge\">Demo</span>" : ""}</td>
-        <td>${escapeHtml(artist.slug)}</td>
-        <td>${escapeHtml(artist.professionalTitle)}</td>
-        <td>${escapeHtml([artist.city, artist.region].filter(Boolean).join(", "))}</td>
-        <td>${badge(artist.status)}</td>
-        <td>${yesNo(artist.featured)}</td>
-        <td>${account ? badge(account.status || "active") : badge(invitation?.status || artist.invitationStatus || "none")}</td>
-        <td>${escapeHtml(plan?.name || "No plan")}<br>${badge(artist.billingStatus || "not_configured")}<br>${badge(limitStatus)}</td>
-        <td>${Number(usage.galleries || 0)} galleries (${Number(usage.publishedGalleries || 0)} published)<br>${Number(usage.artwork || 0)} artwork (${Number(usage.publishedArtwork || 0)} published)<br>${Number(usage.media || 0)} media<br>${Number(usage.storageMb || 0)} MB${evaluation.warnings?.length ? `<br><strong>${escapeHtml(evaluation.warnings[0])}</strong>` : ""}</td>
-        <td>${escapeHtml(profileCompleteness(artist))}</td>
-        <td>${escapeHtml(formatDate(acceptedOrLogin))}</td>
-        <td>${publicLinkHtml(artist)}<br><button type="button" data-copy-path="${attr(absoluteUrl(publicArtistUrl(artist)))}">Copy URL</button></td>
-        <td>${formatDate(artist.updatedAt)}</td>
-        <td class="admin-actions">
-          <button type="button" data-edit-artist="${attr(artist.id)}">Edit</button>
-          ${publicLinkHtml(artist)}
-          <button type="button" data-archive-artist="${attr(artist.id)}"${artist.protected ? " disabled title=\"Seed record is protected\"" : ""}>Archive</button>
-        </td>
-      </tr>
+          <td>${escapeHtml(artist.professionalTitle || "Artist")}<br><span class="admin-muted">${escapeHtml([artist.city, artist.region].filter(Boolean).join(", "))}</span></td>
+          <td>${badge(artist.status)}<br>${account ? badge(account.status || "active") : badge(invitation?.status || artist.invitationStatus || "none")}</td>
+          <td>${escapeHtml(plan?.name || "No plan")}<br>${badge(artist.billingStatus || "not_configured")}<br>${badge(limitStatus)}</td>
+          <td>${Number(usage.galleries || 0)} portfolios<br>${Number(usage.artwork || 0)} artwork<br>${Number(usage.media || 0)} media<br>${Number(usage.storageMb || 0)} MB${evaluation.warnings?.length ? `<br><strong>${escapeHtml(evaluation.warnings[0])}</strong>` : ""}</td>
+          <td>${escapeHtml(profileCompleteness(artist))}</td>
+          <td>${escapeHtml(formatDate(acceptedOrLogin) || "Never")}</td>
+          <td>${publicLinkHtml(artist)}<br><button type="button" data-copy-path="${attr(absoluteUrl(publicArtistUrl(artist)))}">Copy URL</button></td>
+          <td class="admin-actions">
+            <a href="/admin/artists/${attr(artist.id)}/">Open Workspace</a>
+            <a href="/admin/artists/${attr(artist.id)}/portfolios/">Portfolios</a>
+            <button type="button" data-support-artist="${attr(artist.id)}">Support Login</button>
+            <button type="button" data-archive-artist="${attr(artist.id)}"${artist.protected ? " disabled title=\"Seed record is protected\"" : ""}>Archive</button>
+          </td>
+        </tr>
       `;
     }).join("");
-
-    renderArtistForm(state.artists[0] || {});
   }
 
   function renderGalleryForm(gallery = {}) {
@@ -1360,6 +1359,568 @@
     }).join("") : '<tr><td colspan="7">No portfolio pages match these filters.</td></tr>';
 
     renderPortfolioPageForm(pages[0] || {});
+  }
+
+  function currentArtistWorkspaceRoute() {
+    const match = window.location.pathname.match(/^\/admin\/artists\/([^/]+)\/?(.*)$/);
+    if (!match) {
+      return null;
+    }
+
+    const artistId = decodeURIComponent(match[1]);
+    const parts = match[2].split("/").filter(Boolean).map(decodeURIComponent);
+    const section = parts[0] || "overview";
+    const portfolioId = section === "portfolios" ? parts[1] || "" : "";
+    return { artistId, section, portfolioId };
+  }
+
+  function artistWorkspaceUrl(artistId, section = "", portfolioId = "") {
+    const base = `/admin/artists/${encodeURIComponent(artistId)}/`;
+    if (!section || section === "overview") {
+      return base;
+    }
+    if (section === "portfolios" && portfolioId) {
+      return `${base}portfolios/${encodeURIComponent(portfolioId)}/`;
+    }
+    return `${base}${section}/`;
+  }
+
+  function artistPortfolios(artistId) {
+    return state.galleries
+      .filter((gallery) => gallery.artistId === artistId && gallery.status !== "archived")
+      .sort(sortByDisplayOrder);
+  }
+
+  function portfolioPagesFor(artistId, portfolioId = "") {
+    return state.portfolioPages
+      .filter((page) =>
+        page.artistId === artistId &&
+        page.status !== "archived" &&
+        (!portfolioId || page.galleryId === portfolioId)
+      )
+      .sort(sortByDisplayOrder);
+  }
+
+  function artworkForArtist(artistId) {
+    return state.artwork
+      .filter((item) => item.artistId === artistId && item.status !== "archived")
+      .sort(sortByDisplayOrder);
+  }
+
+  function mediaForArtist(artistId) {
+    return activeMedia()
+      .filter((media) => media.ownerArtistId === artistId || [
+        artistById(artistId)?.heroImage,
+        artistById(artistId)?.socialImage,
+        ...artistPortfolios(artistId).flatMap((gallery) => [gallery.coverImage, gallery.socialImage]),
+        ...artworkForArtist(artistId).map((artwork) => artwork.image),
+        ...portfolioPagesFor(artistId).flatMap((page) => [page.featuredImage])
+      ].filter(Boolean).some((path) => mediaContainsReference(media, path)))
+      .sort((left, right) => String(right.createdAt || right.uploadedAt || "").localeCompare(String(left.createdAt || left.uploadedAt || "")));
+  }
+
+  function mediaContainsReference(media, reference) {
+    return [media.publicPath, mediaPath(media, "thumbnail"), mediaPath(media, "gallery"), mediaPath(media, "large")]
+      .filter(Boolean)
+      .includes(reference);
+  }
+
+  function inquiriesForArtist(artistId) {
+    return sortedInquiries().filter((inquiry) => inquiry.artistId === artistId || inquiry.assignedArtistId === artistId);
+  }
+
+  function recentActivityForArtist(artistId) {
+    return state.auditLog
+      .filter((event) => event.targetId === artistId || event.artistId === artistId || String(event.metadata?.artistId || "") === artistId)
+      .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))
+      .slice(0, 8);
+  }
+
+  function workspaceTabs(artistId, active) {
+    const tabs = [
+      ["overview", "Overview"],
+      ["profile", "Profile"],
+      ["portfolios", "Portfolios"],
+      ["media", "Media"],
+      ["inquiries", "Inquiries"],
+      ["billing", "Billing / Subscription"],
+      ["support", "Support Access"],
+      ["settings", "Settings"]
+    ];
+    return `
+      <nav class="artist-workspace-tabs" aria-label="Artist workspace sections">
+        ${tabs.map(([section, label]) => `<a href="${attr(artistWorkspaceUrl(artistId, section))}"${section === active ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`).join("")}
+      </nav>
+    `;
+  }
+
+  function artistOverviewHtml(artist) {
+    const billing = billingForArtist(artist.id);
+    const account = accountByArtistId(artist.id);
+    const invitation = invitationByArtistId(artist.id);
+    const plan = billing.plan || planById(artist.planId);
+    const usage = billing.usage || {};
+    const evaluation = billing.usageEvaluation || {};
+    const portfolios = artistPortfolios(artist.id);
+    const pages = portfolioPagesFor(artist.id);
+    const media = mediaForArtist(artist.id);
+    const inquiries = inquiriesForArtist(artist.id);
+    const recent = recentActivityForArtist(artist.id);
+
+    return `
+      <section class="admin-panel">
+        <div class="artist-workspace-summary">
+          <article>
+            <span>${escapeHtml(artist.status || "draft")}</span>
+            <p>Public Status</p>
+          </article>
+          <article>
+            <span>${escapeHtml(account?.status || invitation?.status || artist.invitationStatus || "none")}</span>
+            <p>Account / Invitation</p>
+          </article>
+          <article>
+            <span>${escapeHtml(plan?.name || "No plan")}</span>
+            <p>Current Plan</p>
+          </article>
+          <article>
+            <span>${escapeHtml(artist.billingStatus || "not_configured")}</span>
+            <p>Billing Status</p>
+          </article>
+        </div>
+        <div class="artist-workspace-actions">
+          ${publicLinkHtml(artist)}
+          <a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Private Preview</a>
+          <button type="button" data-support-artist="${attr(artist.id)}">Enter Artist Portal</button>
+          <a href="${attr(artistWorkspaceUrl(artist.id, "portfolios"))}">Manage Portfolios</a>
+        </div>
+      </section>
+
+      <section class="admin-stats artist-workspace-stats" aria-label="Artist counts">
+        <article><span>${portfolios.length}</span><p>Portfolios</p></article>
+        <article><span>${pages.length}</span><p>Managed Pages</p></article>
+        <article><span>${artworkForArtist(artist.id).length}</span><p>Artwork</p></article>
+        <article><span>${media.length}</span><p>Media</p></article>
+        <article><span>${inquiries.length}</span><p>Inquiries</p></article>
+        <article><span>${Number(usage.storageMb || 0)}</span><p>Storage MB</p></article>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Recent Activity</h2>
+        ${evaluation.warnings?.length ? `<p class="admin-alert">${escapeHtml(evaluation.warnings.join(" "))}</p>` : ""}
+        <div class="workspace-card-list">
+          ${recent.length ? recent.map((event) => `
+            <article class="workspace-card">
+              <div>
+                <p class="section-kicker">${escapeHtml(event.action)}</p>
+                <h3>${escapeHtml(event.summary || event.targetType || "Activity")}</h3>
+                <p>${escapeHtml(formatDateTime(event.createdAt))}</p>
+              </div>
+            </article>
+          `).join("") : '<p class="empty-state">No recent artist-specific activity.</p>'}
+        </div>
+      </section>
+    `;
+  }
+
+  function artistProfileHtml(artist) {
+    return `
+      <section class="admin-panel">
+        <h2>Profile</h2>
+        <p class="admin-muted">Edit the selected artist profile without leaving this artist workspace.</p>
+        <form class="admin-record-form" id="artist-workspace-profile-form"></form>
+        <button class="admin-primary-action" type="submit" form="artist-workspace-profile-form">Save Profile</button>
+      </section>
+    `;
+  }
+
+  function portfolioListHtml(artist) {
+    const portfolios = artistPortfolios(artist.id);
+    return `
+      <section class="admin-panel">
+        <div class="admin-dashboard-heading compact-heading">
+          <div>
+            <p class="section-kicker">Artist Portfolios</p>
+            <h2>${escapeHtml(artist.name)} Portfolios</h2>
+          </div>
+          <button class="admin-primary-action" type="button" data-add-workspace-portfolio="${attr(artist.id)}">Add Portfolio</button>
+        </div>
+        <div class="workspace-card-list">
+          ${portfolios.length ? portfolios.map((portfolio) => {
+            const pages = portfolioPagesFor(artist.id, portfolio.id);
+            return `
+              <article class="workspace-card">
+                <div>
+                  <p class="section-kicker">${escapeHtml(portfolio.slug || "no slug")}</p>
+                  <h3>${escapeHtml(portfolio.title)}</h3>
+                  <p>${badge(portfolio.status || "draft")} Order ${escapeHtml(portfolio.displayOrder || 0)} - ${pages.length} pages</p>
+                  <p>${escapeHtml(messagePreview(portfolio.description, 130))}</p>
+                </div>
+                <div class="admin-actions">
+                  ${publicGalleryLinkHtml(portfolio)}
+                  <a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview</a>
+                  <a href="${attr(artistWorkspaceUrl(artist.id, "portfolios", portfolio.id))}">Open Portfolio</a>
+                  <button type="button" data-workspace-edit-portfolio="${attr(portfolio.id)}">Edit</button>
+                </div>
+              </article>
+            `;
+          }).join("") : '<p class="empty-state">No portfolios for this artist yet.</p>'}
+        </div>
+      </section>
+      <section class="admin-panel" id="workspace-portfolio-editor" hidden>
+        <h2>Portfolio Editor</h2>
+        <form class="admin-record-form" id="artist-workspace-portfolio-form"></form>
+        <button class="admin-primary-action" type="submit" form="artist-workspace-portfolio-form">Save Portfolio</button>
+      </section>
+    `;
+  }
+
+  function portfolioEditorHtml(portfolio = {}, artist) {
+    const publicUrl = portfolio.id ? absoluteUrl(publicGalleryUrl(portfolio)) : "Saved portfolios receive a public URL.";
+    return `
+      <input name="id" type="hidden" value="${attr(portfolio.id || "")}">
+      <input name="artistId" type="hidden" value="${attr(artist.id)}">
+      ${field("title", "Portfolio Title", portfolio.title)}
+      ${field("slug", "Portfolio Slug", portfolio.slug)}
+      <label>
+        <span>Public URL</span>
+        <input name="publicUrlDisplay" type="text" value="${attr(publicUrl)}" disabled>
+      </label>
+      ${imageField("coverImage", "Cover Image", portfolio.coverImage)}
+      ${select("status", "Status", portfolio.status || "draft", statusOptions.map((item) => ({ value: item, label: item })))}
+      ${checkbox("featured", "Featured", portfolio.featured)}
+      ${field("displayOrder", "Display Order", portfolio.displayOrder || 0, "number")}
+      ${textarea("description", "Description", portfolio.description)}
+      ${field("seoTitle", "SEO Title", portfolio.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", portfolio.seoDescription)}
+      ${field("socialTitle", "Social Share Title", portfolio.socialTitle)}
+      ${textarea("socialDescription", "Social Share Description", portfolio.socialDescription)}
+      ${imageField("socialImage", "Social Share Image", portfolio.socialImage || portfolio.coverImage)}
+      ${field("canonicalUrlOverride", "Canonical URL Override", portfolio.canonicalUrlOverride)}
+      ${checkbox("noindex", "Noindex Public Gallery", portfolio.noindex)}
+    `;
+  }
+
+  function portfolioDetailHtml(artist, portfolio) {
+    const pages = portfolioPagesFor(artist.id, portfolio.id);
+    return `
+      <section class="admin-panel">
+        <div class="portfolio-detail-heading">
+          <div>
+            <p class="section-kicker">Portfolio Detail</p>
+            <h2>${escapeHtml(portfolio.title)}</h2>
+            <p>${escapeHtml(portfolio.description || "No description yet.")}</p>
+            <p>${badge(portfolio.status || "draft")} Slug: ${escapeHtml(portfolio.slug || "none")} - Order ${escapeHtml(portfolio.displayOrder || 0)}</p>
+          </div>
+          ${portfolio.coverImage ? `<img src="${attr(portfolio.coverImage)}" alt="">` : ""}
+        </div>
+        <div class="artist-workspace-actions">
+          ${publicGalleryLinkHtml(portfolio)}
+          <a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview Artist</a>
+          <button type="button" data-workspace-edit-portfolio="${attr(portfolio.id)}">Edit Portfolio</button>
+          <button type="button" data-add-workspace-page="${attr(portfolio.id)}">Add Page</button>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Pages In This Portfolio</h2>
+        <div class="workspace-card-list" data-portfolio-page-order="${attr(portfolio.id)}">
+          ${pages.length ? pages.map((page, index) => `
+            <article class="workspace-card portfolio-page-card">
+              ${page.featuredImage ? `<img src="${attr(page.featuredImage)}" alt="">` : '<div class="workspace-thumb-empty">No image</div>'}
+              <div>
+                <p class="section-kicker">Order ${escapeHtml(page.displayOrder || 0)} - ${escapeHtml((page.pageType || "text_page").replaceAll("_", " "))}</p>
+                <h3>${escapeHtml(page.title)}</h3>
+                <p>${badge(page.status || "draft")} ${escapeHtml(page.subtitle || "")}</p>
+              </div>
+              <div class="admin-actions">
+                <button type="button" data-move-portfolio-page="${attr(page.id)}" data-direction="up"${index === 0 ? " disabled" : ""}>Move Up</button>
+                <button type="button" data-move-portfolio-page="${attr(page.id)}" data-direction="down"${index === pages.length - 1 ? " disabled" : ""}>Move Down</button>
+                <button type="button" data-workspace-edit-page="${attr(page.id)}">Edit</button>
+                <a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview</a>
+              </div>
+            </article>
+          `).join("") : '<p class="empty-state">No managed pages in this portfolio yet.</p>'}
+        </div>
+      </section>
+
+      <section class="admin-panel" id="workspace-portfolio-editor" hidden>
+        <h2>Portfolio Editor</h2>
+        <form class="admin-record-form" id="artist-workspace-portfolio-form"></form>
+        <button class="admin-primary-action" type="submit" form="artist-workspace-portfolio-form">Save Portfolio</button>
+      </section>
+
+      <section class="admin-panel" id="workspace-page-editor" hidden>
+        <h2>Page Editor</h2>
+        <form class="admin-record-form" id="artist-workspace-page-form"></form>
+        <button class="admin-primary-action" type="submit" form="artist-workspace-page-form">Save Page</button>
+      </section>
+    `;
+  }
+
+  function portfolioPageEditorHtml(page = {}, artist, portfolio) {
+    const artworkOptions = artworkForArtist(artist.id)
+      .filter((item) => !portfolio?.id || item.galleryId === portfolio.id)
+      .map((item) => ({ value: item.id, label: item.title }));
+    const mediaOptions = mediaForArtist(artist.id).map((item) => ({ value: item.id, label: item.originalFilename || item.publicPath }));
+    return `
+      <input name="id" type="hidden" value="${attr(page.id || "")}">
+      <input name="artistId" type="hidden" value="${attr(artist.id)}">
+      <input name="galleryId" type="hidden" value="${attr(portfolio.id)}">
+      ${field("title", "Page Title", page.title)}
+      ${field("subtitle", "Subtitle", page.subtitle)}
+      ${select("pageType", "Page Type", page.pageType || "text_page", portfolioPageTypeOptions.map((type) => ({ value: type, label: type.replaceAll("_", " ") })))}
+      ${select("status", "Status", page.status || "draft", statusOptions.map((status) => ({ value: status, label: status })))}
+      ${imageField("featuredImage", "Featured / Hero Image", page.featuredImage)}
+      ${textarea("bodyContent", "Body Content", page.bodyContent)}
+      ${field("artworkIds", "Artwork IDs Comma Separated", (page.artworkIds || []).join(", "))}
+      <label>
+        <span>Available Artwork IDs</span>
+        <select data-copy-selected-value>
+          <option value="">Copy an artwork ID</option>
+          ${artworkOptions.map((item) => `<option value="${attr(item.value)}">${escapeHtml(item.label)} - ${escapeHtml(item.value)}</option>`).join("")}
+        </select>
+      </label>
+      ${field("mediaIds", "Media IDs Comma Separated", (page.mediaIds || []).join(", "))}
+      <label>
+        <span>Available Media IDs</span>
+        <select data-copy-selected-value>
+          <option value="">Copy a media ID</option>
+          ${mediaOptions.map((item) => `<option value="${attr(item.value)}">${escapeHtml(item.label)} - ${escapeHtml(item.value)}</option>`).join("")}
+        </select>
+      </label>
+      ${field("year", "Year", page.year)}
+      ${field("location", "Location", page.location)}
+      ${field("medium", "Medium", page.medium)}
+      ${field("dimensions", "Dimensions", page.dimensions)}
+      ${field("clientInfo", "Client / Commission Info", page.clientInfo)}
+      ${field("displayOrder", "Display Order", page.displayOrder || ((portfolioPagesFor(artist.id, portfolio.id).length + 1) * 10), "number")}
+      ${field("ctaLabel", "CTA Label", page.ctaLabel)}
+      ${field("ctaUrl", "CTA URL", page.ctaUrl)}
+      ${field("seoTitle", "SEO Title", page.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", page.seoDescription)}
+    `;
+  }
+
+  function artistMediaHtml(artist) {
+    const media = mediaForArtist(artist.id);
+    return `
+      <section class="admin-panel">
+        <h2>Media</h2>
+        <p class="admin-muted">Artist-owned or artist-assigned uploaded media.</p>
+        <div class="admin-media-grid">
+          ${media.length ? media.map((item) => `
+            <article class="admin-media-card">
+              <img src="${attr(mediaPath(item, "thumbnail"))}" alt="${attr(item.originalFilename)}">
+              <div>
+                <h3>${escapeHtml(item.originalFilename || item.publicPath)}</h3>
+                <p>${escapeHtml(mediaPath(item, "gallery") || item.publicPath)}</p>
+                <p>${escapeHtml(item.mimeType || "")} - ${formatBytes(item.originalSize || item.size)} - ${badge(item.status || "ready")}</p>
+              </div>
+              <div class="admin-actions">
+                <button type="button" data-copy-path="${attr(mediaPath(item, "gallery"))}">Copy Path</button>
+              </div>
+            </article>
+          `).join("") : '<p class="empty-state">No media assigned to this artist yet.</p>'}
+        </div>
+      </section>
+    `;
+  }
+
+  function artistInquiriesHtml(artist) {
+    const inquiries = inquiriesForArtist(artist.id);
+    return `
+      <section class="admin-panel">
+        <h2>Inquiries</h2>
+        <div class="workspace-card-list">
+          ${inquiries.length ? inquiries.map((inquiry) => `
+            <article class="workspace-card">
+              <div>
+                <p class="section-kicker">${escapeHtml(formatDateTime(inquiry.createdAt))}</p>
+                <h3>${escapeHtml(inquiry.visitorName)}</h3>
+                <p><a href="mailto:${attr(inquiry.visitorEmail)}">${escapeHtml(inquiry.visitorEmail)}</a> ${badge(inquiry.status || "new")}</p>
+                <p>${escapeHtml(messagePreview(inquiry.message, 180))}</p>
+              </div>
+              <div class="admin-actions">
+                <a href="${mailtoForInquiry(inquiry)}">Reply</a>
+                <a href="/admin/inquiries/">Open Inquiries</a>
+              </div>
+            </article>
+          `).join("") : '<p class="empty-state">No inquiries for this artist yet.</p>'}
+        </div>
+      </section>
+    `;
+  }
+
+  function artistBillingHtml(artist) {
+    const billing = billingForArtist(artist.id);
+    const usage = billing.usage || {};
+    const evaluation = billing.usageEvaluation || {};
+    return `
+      <section class="admin-panel">
+        <h2>Billing / Subscription</h2>
+        <div class="inquiry-detail-grid">
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">Current Plan</p>
+            <h3>${escapeHtml((billing.plan || planById(artist.planId))?.name || "No plan")}</h3>
+            <p>${badge(artist.billingStatus || "not_configured")} ${badge(artist.subscriptionStatus || "not_configured")}</p>
+          </article>
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">Usage</p>
+            <h3>${Number(usage.storageMb || 0)} MB</h3>
+            <p>${Number(usage.galleries || 0)} portfolios, ${Number(usage.artwork || 0)} artwork, ${Number(usage.media || 0)} media</p>
+            ${evaluation.warnings?.length ? `<p>${escapeHtml(evaluation.warnings.join(" "))}</p>` : ""}
+          </article>
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">Stripe / Customer</p>
+            <h3>${escapeHtml(artist.externalCustomerId || "Not configured")}</h3>
+            <p>${escapeHtml(artist.externalSubscriptionId || "No subscription id")}</p>
+          </article>
+        </div>
+        <form class="admin-record-form" id="artist-workspace-billing-form" data-artist-id="${attr(artist.id)}">
+          ${select("planId", "Plan", artist.planId || state.plans[0]?.id || "", state.plans.map((plan) => ({ value: plan.id, label: plan.name })))}
+          ${select("billingStatus", "Billing Status", artist.billingStatus || "not_configured", billingStatusOptions.map((item) => ({ value: item, label: item })))}
+          ${select("subscriptionStatus", "Subscription Status", artist.subscriptionStatus || "not_configured", subscriptionStatusOptions.map((item) => ({ value: item, label: item })))}
+          ${field("trialStartAt", "Trial Start", artist.trialStartAt)}
+          ${field("trialEndAt", "Trial End", artist.trialEndAt)}
+          ${field("currentPeriodStart", "Current Period Start", artist.currentPeriodStart)}
+          ${field("currentPeriodEnd", "Current Period End", artist.currentPeriodEnd)}
+          ${field("externalCustomerId", "Stripe Customer ID", artist.externalCustomerId)}
+          ${field("externalSubscriptionId", "Stripe Subscription ID", artist.externalSubscriptionId)}
+          ${checkbox("cancelAtPeriodEnd", "Cancel at Period End", artist.cancelAtPeriodEnd)}
+          ${checkbox("ignoreLimits", "Ignore Plan Limits", artist.ignoreLimits)}
+          ${field("customGalleryLimit", "Custom Portfolio Limit", artist.customGalleryLimit || 0, "number")}
+          ${field("customArtworkLimit", "Custom Artwork Limit", artist.customArtworkLimit || 0, "number")}
+          ${field("customMediaLimit", "Custom Media Limit", artist.customMediaLimit || 0, "number")}
+          ${field("customStorageLimit", "Custom Storage Limit MB", artist.customStorageLimit || 0, "number")}
+          ${textarea("limitOverrideNotes", "Admin Override Notes", artist.limitOverrideNotes)}
+        </form>
+        <button class="admin-primary-action" type="submit" form="artist-workspace-billing-form">Save Billing</button>
+      </section>
+    `;
+  }
+
+  function artistSupportHtml(artist) {
+    const account = accountByArtistId(artist.id);
+    return `
+      <section class="admin-panel">
+        <h2>Support Access</h2>
+        <div class="inquiry-detail-grid">
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">Artist Account</p>
+            <h3>${escapeHtml(account?.email || artist.contactEmail || "No account email")}</h3>
+            <p>${badge(account?.status || artist.invitationStatus || "none")}</p>
+          </article>
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">Support Tools</p>
+            <h3>Enter Artist Portal</h3>
+            <p class="admin-muted">Support mode is audited and clearly labeled in the artist portal.</p>
+          </article>
+        </div>
+        <div class="artist-workspace-actions">
+          ${publicLinkHtml(artist)}
+          <a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Private Preview</a>
+          <button type="button" data-support-artist="${attr(artist.id)}">Enter Artist Portal / Support Login</button>
+        </div>
+      </section>
+    `;
+  }
+
+  function artistSettingsHtml(artist) {
+    return `
+      <section class="admin-panel">
+        <h2>Settings</h2>
+        <div class="inquiry-detail-grid">
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">Public URL</p>
+            <h3>${escapeHtml(publicArtistUrl(artist))}</h3>
+            <p>${escapeHtml(absoluteUrl(publicArtistUrl(artist)))}</p>
+          </article>
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">Custom Domain</p>
+            <h3>${escapeHtml(artist.customDomain || "No custom domain")}</h3>
+            <p>${badge(artist.domainStatus || "not_configured")} ${badge(artist.sslStatus || "not_configured")}</p>
+          </article>
+          <article class="inquiry-detail-card">
+            <p class="section-kicker">SEO</p>
+            <h3>${escapeHtml(artist.seoTitle || "No SEO title")}</h3>
+            <p>${escapeHtml(messagePreview(artist.seoDescription, 140))}</p>
+          </article>
+        </div>
+        <p class="admin-muted">Domain, URL, and SEO fields are edited from the Profile tab so the artist record stays together.</p>
+      </section>
+    `;
+  }
+
+  function renderArtistWorkspace() {
+    const root = document.getElementById("artist-workspace-root");
+    if (!root) {
+      return;
+    }
+
+    const route = currentArtistWorkspaceRoute();
+    const artist = route ? artistById(route.artistId) : null;
+    if (!artist) {
+      root.innerHTML = `
+        <section class="admin-panel">
+          <h1 id="artist-workspace-title">Artist Not Found</h1>
+          <p class="admin-muted">Return to the artist list and choose an artist workspace.</p>
+          <a class="admin-primary-action" href="/admin/artists/">Back to Artists</a>
+        </section>
+      `;
+      return;
+    }
+
+    const activeSection = route.section === "portfolios" && route.portfolioId ? "portfolios" : route.section;
+    const portfolio = route.portfolioId ? state.galleries.find((gallery) => gallery.id === route.portfolioId && gallery.artistId === artist.id) : null;
+    let body = "";
+
+    if (route.section === "overview") {
+      body = artistOverviewHtml(artist);
+    } else if (route.section === "profile") {
+      body = artistProfileHtml(artist);
+    } else if (route.section === "portfolios" && route.portfolioId) {
+      body = portfolio ? portfolioDetailHtml(artist, portfolio) : `<section class="admin-panel"><h2>Portfolio Not Found</h2><p class="admin-muted">This portfolio does not belong to ${escapeHtml(artist.name)}.</p></section>`;
+    } else if (route.section === "portfolios") {
+      body = portfolioListHtml(artist);
+    } else if (route.section === "media") {
+      body = artistMediaHtml(artist);
+    } else if (route.section === "inquiries") {
+      body = artistInquiriesHtml(artist);
+    } else if (route.section === "billing") {
+      body = artistBillingHtml(artist);
+    } else if (route.section === "support") {
+      body = artistSupportHtml(artist);
+    } else if (route.section === "settings") {
+      body = artistSettingsHtml(artist);
+    } else {
+      body = artistOverviewHtml(artist);
+    }
+
+    root.innerHTML = `
+      <div class="artist-workspace-breadcrumb">
+        <a href="/admin/artists/">Artists</a>
+        <span>/</span>
+        <span>${escapeHtml(artist.name)}</span>
+        ${portfolio ? `<span>/</span><span>${escapeHtml(portfolio.title)}</span>` : ""}
+      </div>
+      <div class="admin-dashboard-heading artist-workspace-heading">
+        <div>
+          <p class="section-kicker">Artist Workspace</p>
+          <h1 id="artist-workspace-title">${escapeHtml(artist.name)}</h1>
+          <p class="admin-muted">${escapeHtml(artist.professionalTitle || "Artist")} ${artist.slug ? `- /${escapeHtml(artist.slug)}/` : ""}</p>
+        </div>
+        <div class="artist-workspace-actions">
+          ${publicLinkHtml(artist)}
+          <a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview</a>
+        </div>
+      </div>
+      ${workspaceTabs(artist.id, activeSection)}
+      ${body}
+    `;
+
+    if (route.section === "profile") {
+      renderArtistForm(artist, "artist-workspace-profile-form");
+    }
   }
 
   function renderMedia() {
@@ -1631,6 +2192,7 @@
     renderGalleries();
     renderArtwork();
     renderPortfolioPages();
+    renderArtistWorkspace();
     renderMedia();
     renderInquiries();
     renderInvitations();
@@ -1686,6 +2248,94 @@
 
     updateFromPayload(payload);
     showMessage(payload.ok ? "success" : "error", payload.message || "Plan save failed.", payload.errors);
+  }
+
+  async function saveArtistBilling(form) {
+    const artistId = form.dataset.artistId;
+    const payload = await api(`/admin/api/artists/${encodeURIComponent(artistId)}/billing`, {
+      method: "POST",
+      body: JSON.stringify(formData(form))
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Billing save failed.", payload.errors);
+  }
+
+  function clientSlug(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64);
+  }
+
+  function showWorkspacePortfolioEditor(artistId, portfolioId = "") {
+    const artist = artistById(artistId);
+    const editor = document.getElementById("workspace-portfolio-editor");
+    const form = document.getElementById("artist-workspace-portfolio-form");
+    if (!artist || !editor || !form) {
+      return;
+    }
+
+    const existing = portfolioId ? state.galleries.find((gallery) => gallery.id === portfolioId && gallery.artistId === artistId) : null;
+    const draft = existing || {
+      artistId,
+      title: "",
+      slug: "",
+      status: "draft",
+      displayOrder: (artistPortfolios(artistId).length + 1) * 10
+    };
+    form.innerHTML = portfolioEditorHtml(draft, artist);
+    editor.hidden = false;
+    editor.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function showWorkspacePageEditor(artistId, portfolioId, pageId = "") {
+    const artist = artistById(artistId);
+    const portfolio = state.galleries.find((gallery) => gallery.id === portfolioId && gallery.artistId === artistId);
+    const editor = document.getElementById("workspace-page-editor");
+    const form = document.getElementById("artist-workspace-page-form");
+    if (!artist || !portfolio || !editor || !form) {
+      return;
+    }
+
+    const existing = pageId ? state.portfolioPages.find((page) => page.id === pageId && page.artistId === artistId && page.galleryId === portfolioId) : null;
+    const draft = existing || {
+      artistId,
+      galleryId: portfolioId,
+      title: "",
+      pageType: "artwork_feature",
+      status: "draft",
+      displayOrder: (portfolioPagesFor(artistId, portfolioId).length + 1) * 10
+    };
+    form.innerHTML = portfolioPageEditorHtml(draft, artist, portfolio);
+    editor.hidden = false;
+    editor.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function reorderWorkspacePage(pageId, direction) {
+    const route = currentArtistWorkspaceRoute();
+    if (!route?.artistId || !route.portfolioId) {
+      return;
+    }
+
+    const pages = portfolioPagesFor(route.artistId, route.portfolioId);
+    const index = pages.findIndex((page) => page.id === pageId);
+    const nextIndex = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || nextIndex < 0 || nextIndex >= pages.length) {
+      return;
+    }
+
+    const reordered = pages.slice();
+    const [page] = reordered.splice(index, 1);
+    reordered.splice(nextIndex, 0, page);
+    const payload = await api(`/admin/api/artists/${encodeURIComponent(route.artistId)}/portfolios/${encodeURIComponent(route.portfolioId)}/pages/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ orderedIds: reordered.map((item) => item.id) })
+    });
+
+    updateFromPayload(payload);
+    showMessage(payload.ok ? "success" : "error", payload.message || "Page reorder failed.");
   }
 
   async function saveReviewAction(form) {
@@ -1783,8 +2433,8 @@
       method: "POST",
       body: JSON.stringify({
         note,
-        sourcePage: "/admin/users/",
-        returnTo: "/admin/users/"
+        sourcePage: window.location.pathname,
+        returnTo: window.location.pathname
       })
     });
 
@@ -1819,6 +2469,11 @@
       const supportArtist = event.target.closest("[data-support-artist]");
       const portfolioPageEdit = event.target.closest("[data-edit-portfolio-page]");
       const portfolioPageArchive = event.target.closest("[data-archive-portfolio-page]");
+      const workspacePortfolioAdd = event.target.closest("[data-add-workspace-portfolio]");
+      const workspacePortfolioEdit = event.target.closest("[data-workspace-edit-portfolio]");
+      const workspacePageAdd = event.target.closest("[data-add-workspace-page]");
+      const workspacePageEdit = event.target.closest("[data-workspace-edit-page]");
+      const workspacePageMove = event.target.closest("[data-move-portfolio-page]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -1883,6 +2538,24 @@
       if (portfolioPageArchive) {
         archive(portfolioPageArchive.dataset.archivePortfolioPage, "/admin/api/portfolio-pages");
       }
+      if (workspacePortfolioAdd) {
+        showWorkspacePortfolioEditor(workspacePortfolioAdd.dataset.addWorkspacePortfolio);
+      }
+      if (workspacePortfolioEdit) {
+        const route = currentArtistWorkspaceRoute();
+        showWorkspacePortfolioEditor(route?.artistId || "", workspacePortfolioEdit.dataset.workspaceEditPortfolio);
+      }
+      if (workspacePageAdd) {
+        const route = currentArtistWorkspaceRoute();
+        showWorkspacePageEditor(route?.artistId || "", workspacePageAdd.dataset.addWorkspacePage);
+      }
+      if (workspacePageEdit) {
+        const route = currentArtistWorkspaceRoute();
+        showWorkspacePageEditor(route?.artistId || "", route?.portfolioId || "", workspacePageEdit.dataset.workspaceEditPage);
+      }
+      if (workspacePageMove) {
+        reorderWorkspacePage(workspacePageMove.dataset.movePortfolioPage, workspacePageMove.dataset.direction);
+      }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
       }
@@ -1906,6 +2579,7 @@
       const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
       const userFilter = event.target.closest("#users-account-filter, #users-plan-filter, #users-billing-filter");
       const portfolioFilter = event.target.closest("#portfolio-page-artist-filter, #portfolio-page-status-filter, #portfolio-page-type-filter");
+      const copySelectedValue = event.target.closest("[data-copy-selected-value]");
       if (mediaSelect?.value) {
         const input = document.querySelector(`[name="${mediaSelect.dataset.mediaSelect}"]`);
         if (input) {
@@ -1927,6 +2601,10 @@
       if (portfolioFilter) {
         renderPortfolioPages();
       }
+      if (copySelectedValue?.value) {
+        copyPath(copySelectedValue.value);
+        copySelectedValue.value = "";
+      }
     });
 
     document.addEventListener("input", (event) => {
@@ -1934,8 +2612,15 @@
       const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
       const userSearch = event.target.closest("#users-search");
       const portfolioSearch = event.target.closest("#portfolio-page-search");
+      const workspacePortfolioTitle = event.target.closest("#artist-workspace-portfolio-form [name='title']");
       if (imageInput) {
         updateImagePreview(imageInput.dataset.imageInput, imageInput.value);
+      }
+      if (workspacePortfolioTitle) {
+        const slugInput = document.querySelector("#artist-workspace-portfolio-form [name='slug']");
+        if (slugInput && !slugInput.value) {
+          slugInput.value = clientSlug(workspacePortfolioTitle.value);
+        }
       }
       if (auditFilter) {
         renderAudit();
@@ -2003,6 +2688,30 @@
       if (reviewForm) {
         event.preventDefault();
         saveReviewAction(reviewForm);
+      }
+
+      const workspaceProfileForm = event.target.closest("#artist-workspace-profile-form");
+      if (workspaceProfileForm) {
+        event.preventDefault();
+        save("artist", workspaceProfileForm, "/admin/api/artists");
+      }
+
+      const workspacePortfolioForm = event.target.closest("#artist-workspace-portfolio-form");
+      if (workspacePortfolioForm) {
+        event.preventDefault();
+        save("gallery", workspacePortfolioForm, "/admin/api/galleries");
+      }
+
+      const workspacePageForm = event.target.closest("#artist-workspace-page-form");
+      if (workspacePageForm) {
+        event.preventDefault();
+        save("portfolioPage", workspacePageForm, "/admin/api/portfolio-pages");
+      }
+
+      const workspaceBillingForm = event.target.closest("#artist-workspace-billing-form");
+      if (workspaceBillingForm) {
+        event.preventDefault();
+        saveArtistBilling(workspaceBillingForm);
       }
     });
   }

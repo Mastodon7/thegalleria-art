@@ -13,16 +13,13 @@
       <a class="brand-link" href="/">The Galleria.Art</a>
       <nav class="admin-nav" aria-label="Admin navigation">
         <a href="/admin/">Dashboard</a>
-        <a href="/admin/users/">Users</a>
+        <a href="/admin/users/">Users / Accounts</a>
         <a aria-current="page" href="/admin/artists/">Artists</a>
-        <a href="/admin/galleries/">Galleries</a>
-        <a href="/admin/portfolio-pages/">Portfolio Pages</a>
-        <a href="/admin/artwork/">Artwork</a>
         <a href="/admin/media/">Media</a>
         <a href="/admin/inquiries/">Inquiries</a>
         <a href="/admin/invitations/">Invitations</a>
         <a href="/admin/review/">Review</a>
-        <a href="/admin/plans/">Plans</a>
+        <a href="/admin/plans/">Plans / Billing</a>
         <a href="/admin/audit/">Audit</a>
         <a href="/admin/settings/">Settings</a>
       </nav>
@@ -36,9 +33,9 @@
         <div>
           <p class="section-kicker">Management</p>
           <h1 id="artists-title">Artists</h1>
-          <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
+          <p class="admin-muted">Choose one artist to manage their profile, portfolios, pages, media, billing, inquiries, and support tools.</p>
         </div>
-        <button class="admin-primary-action" id="add-artist" type="button">Add Artist</button>
+        <a class="admin-primary-action" href="/admin/invitations/">Invite Artist</a>
       </div>
 
       <section class="admin-panel" aria-labelledby="artist-list-title">
@@ -48,31 +45,18 @@
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Slug</th>
-                <th>Professional Title</th>
-                <th>City</th>
-                <th>Status</th>
-                <th>Featured</th>
-                <th>Account</th>
-                <th>Billing</th>
-                <th>Usage</th>
                 <th>Profile</th>
+                <th>Status / Account</th>
+                <th>Plan / Billing</th>
+                <th>Usage</th>
                 <th>Accepted / Login</th>
                 <th>Public URL</th>
-                <th>Updated</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody id="artists-table"></tbody>
           </table>
         </div>
-      </section>
-
-      <section class="admin-panel" aria-labelledby="artist-form-title">
-        <h2 id="artist-form-title">Artist Edit Foundation</h2>
-        <p class="admin-muted">Create or update artist records. Seed records are protected from archive.</p>
-        <form class="admin-record-form" id="artist-form"></form>
-        <button class="admin-primary-action" type="submit" form="artist-form">Save Artist</button>
       </section>
     </main>
   </div>
