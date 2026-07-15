@@ -2,6 +2,8 @@
 
 Public website foundation for The Galleria.Art.
 
+For MVP launch readiness, production setup, and the final QA checklist, see [`docs/MVP_LAUNCH_CHECKLIST.md`](docs/MVP_LAUNCH_CHECKLIST.md).
+
 The root domain presents the gallery platform landing page. Carolyn Elaine's preserved portfolio is available at:
 
 - `/carolyn-elaine/`

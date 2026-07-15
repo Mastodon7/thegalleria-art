@@ -196,6 +196,7 @@ function isSecureRequest(request) {
 function createSignedSessionCookie(cookieName, session, request) {
   const payload = Buffer.from(JSON.stringify({
     ...session,
+    iat: Date.now(),
     exp: Date.now() + sessionMaxAgeSeconds * 1000
   })).toString("base64url");
   const token = `${payload}.${sign(payload)}`;
@@ -257,7 +258,17 @@ function getSignedSession(request, cookieName) {
 }
 
 function getSession(request) {
-  return getSignedSession(request, adminSessionCookieName);
+  const session = getSignedSession(request, adminSessionCookieName);
+  if (!session) {
+    return null;
+  }
+
+  const account = adminAccountFor(loadContent(), session.email);
+  if (account?.sessionRevokedAt && Number(session.iat || 0) < new Date(account.sessionRevokedAt).getTime()) {
+    return null;
+  }
+
+  return session;
 }
 
 function getArtistSession(request) {
@@ -1066,6 +1077,7 @@ function upsertAdminPassword(content, email, password) {
       passwordHash: nextHash,
       passwordSalt: salt,
       status: "active",
+      sessionRevokedAt: now,
       createdAt: now,
       updatedAt: now
     };
@@ -1076,6 +1088,7 @@ function upsertAdminPassword(content, email, password) {
   account.passwordHash = nextHash;
   account.passwordSalt = salt;
   account.updatedAt = now;
+  account.sessionRevokedAt = now;
   return account;
 }
 
@@ -3723,7 +3736,7 @@ function handlePublicInquiry(request, response) {
 
   parseInquiryPayload(request, response, (input) => {
     if (cleanString(input.companyWebsite || input.website)) {
-      sendJson(response, 200, { ok: true, message: "Thank you. Your inquiry has been received." });
+      sendJson(response, 200, { ok: false, message: "Thank you. Your inquiry has been received." });
       return;
     }
 
@@ -4539,6 +4552,7 @@ function handlePasswordResetComplete(request, response, token) {
       const salt = crypto.randomBytes(16).toString("hex");
       account.passwordHash = hashArtistPassword(input.password || "", salt);
       account.passwordSalt = salt;
+      account.sessionRevokedAt = nowIso();
       account.updatedAt = nowIso();
     }
 
@@ -5067,6 +5081,10 @@ function getArtistContext(request) {
     return null;
   }
 
+  if (account.sessionRevokedAt && Number(session.iat || 0) < new Date(account.sessionRevokedAt).getTime()) {
+    return null;
+  }
+
   return { account, artist, content };
 }
 
@@ -5193,6 +5211,20 @@ async function createStripeCheckoutForArtist(context, input = {}) {
     return { ok: false, statusCode: 401, message: "Artist login required." };
   }
 
+  if (context.support?.active) {
+    addAuditEvent(content, {
+      actorType: "admin_support",
+      actorId: context.support.adminEmail,
+      action: "support.billing.blocked",
+      targetType: "artist",
+      targetId: context.artist.id,
+      summary: `Support mode billing action blocked for ${context.artist.name}`
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "support-billing-blocked");
+    return { ok: false, statusCode: 403, message: "Billing actions are disabled while support mode is active." };
+  }
+
   if (!readiness.checkoutAvailable) {
     return { ok: false, statusCode: 400, message: "Online billing is not enabled yet. Please contact The Galleria.Art." };
   }
@@ -5261,6 +5293,20 @@ async function createStripePortalForArtist(context) {
 
   if (!artist || !account) {
     return { ok: false, statusCode: 401, message: "Artist login required." };
+  }
+
+  if (context.support?.active) {
+    addAuditEvent(content, {
+      actorType: "admin_support",
+      actorId: context.support.adminEmail,
+      action: "support.billing.blocked",
+      targetType: "artist",
+      targetId: context.artist.id,
+      summary: `Support mode billing action blocked for ${context.artist.name}`
+    });
+    trimOperationalLogs(content);
+    saveContent(content, "support-billing-blocked");
+    return { ok: false, statusCode: 403, message: "Billing actions are disabled while support mode is active." };
   }
 
   if (!readiness.portalAvailable || !artist.externalCustomerId) {
