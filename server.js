@@ -5710,11 +5710,24 @@ function updateArtistProfile(context, input) {
 
 function updateArtistGallery(context, id, input) {
   const content = context.content;
-  const gallery = content.galleries.find((item) => item.id === id && item.artistId === context.artist.id);
+  const creating = !id || id === "new";
+  let gallery = content.galleries.find((item) => item.id === id && item.artistId === context.artist.id);
   const errors = [];
 
-  if (!gallery) {
+  if (!gallery && !creating) {
     return { ok: false, statusCode: 404, message: "Gallery was not found." };
+  }
+
+  if (!gallery) {
+    gallery = {
+      id: generateId("gallery"),
+      artistId: context.artist.id,
+      slug: "",
+      status: "draft",
+      featured: false,
+      protected: false,
+      createdAt: nowIso()
+    };
   }
 
   if (!cleanString(input.title)) {
@@ -5748,6 +5761,16 @@ function updateArtistGallery(context, id, input) {
     return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors };
   }
 
+  if (creating) {
+    const limitResult = enforceArtistLimit(content, context.artist.id, "gallery_create");
+    if (!limitResult.ok) {
+      recordLimitBlocked(content, context.artist, "gallery_create", limitResult, context.support?.active ? "admin_support" : "artist", context.support?.adminEmail || context.account.email);
+      trimOperationalLogs(content);
+      saveContent(content, "artist-gallery-limit-blocked");
+      return { ok: false, statusCode: limitResult.statusCode, message: limitResult.message, errors: [limitResult.message] };
+    }
+  }
+
   const previousSlug = gallery.slug;
   Object.assign(gallery, {
     title: cleanString(input.title),
@@ -5770,6 +5793,10 @@ function updateArtistGallery(context, id, input) {
     updatedAt: nowIso()
   });
 
+  if (creating) {
+    content.galleries.push(gallery);
+  }
+
   if (previousSlug !== gallery.slug) {
     addAuditEvent(content, {
       actorType: context.support?.active ? "admin_support" : "artist",
@@ -5784,10 +5811,10 @@ function updateArtistGallery(context, id, input) {
   addAuditEvent(content, {
     actorType: context.support?.active ? "admin_support" : "artist",
     actorId: context.support?.adminEmail || context.account.email,
-    action: "gallery.seo.updated",
+    action: creating ? "gallery.created" : "gallery.seo.updated",
     targetType: "gallery",
     targetId: gallery.id,
-    summary: `Gallery SEO fields updated for ${gallery.title}`
+    summary: creating ? `Gallery created: ${gallery.title}` : `Gallery SEO fields updated for ${gallery.title}`
   });
 
   const supportActor = supportAuditActor(context);
@@ -5807,15 +5834,26 @@ function updateArtistGallery(context, id, input) {
 
 function updateArtistArtwork(context, id, input) {
   const content = context.content;
-  const artwork = content.artwork.find((item) => item.id === id && item.artistId === context.artist.id);
+  const creating = !id || id === "new";
+  let artwork = content.artwork.find((item) => item.id === id && item.artistId === context.artist.id);
   const ownGallery = content.galleries.find((gallery) =>
     gallery.id === cleanString(input.galleryId || artwork?.galleryId) &&
     gallery.artistId === context.artist.id
   );
   const errors = [];
 
-  if (!artwork) {
+  if (!artwork && !creating) {
     return { ok: false, statusCode: 404, message: "Artwork was not found." };
+  }
+
+  if (!artwork) {
+    artwork = {
+      id: generateId("artwork"),
+      artistId: context.artist.id,
+      status: "draft",
+      protected: false,
+      createdAt: nowIso()
+    };
   }
 
   if (!ownGallery) {
@@ -5835,6 +5873,16 @@ function updateArtistArtwork(context, id, input) {
     return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors };
   }
 
+  if (creating) {
+    const limitResult = enforceArtistLimit(content, context.artist.id, "artwork_create");
+    if (!limitResult.ok) {
+      recordLimitBlocked(content, context.artist, "artwork_create", limitResult, context.support?.active ? "admin_support" : "artist", context.support?.adminEmail || context.account.email);
+      trimOperationalLogs(content);
+      saveContent(content, "artist-artwork-limit-blocked");
+      return { ok: false, statusCode: limitResult.statusCode, message: limitResult.message, errors: [limitResult.message] };
+    }
+  }
+
   Object.assign(artwork, {
     galleryId: ownGallery.id,
     title: cleanString(input.title),
@@ -5849,6 +5897,19 @@ function updateArtistArtwork(context, id, input) {
     adminReviewNote: "",
     displayOrder: Number(input.displayOrder || 0),
     updatedAt: nowIso()
+  });
+
+  if (creating) {
+    content.artwork.push(artwork);
+  }
+
+  addAuditEvent(content, {
+    actorType: context.support?.active ? "admin_support" : "artist",
+    actorId: context.support?.adminEmail || context.account.email,
+    action: creating ? "artwork.created" : "artwork.updated",
+    targetType: "artwork",
+    targetId: artwork.id,
+    summary: `${creating ? "Created" : "Updated"} artwork ${artwork.title}`
   });
 
   const supportActor = supportAuditActor(context);

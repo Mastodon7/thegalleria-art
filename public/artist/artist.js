@@ -1146,6 +1146,14 @@
         copyValue(copyPublicUrl.dataset.copyPublicUrl);
       }
 
+      if (event.target.id === "artist-add-gallery") {
+        renderGalleryForm({});
+      }
+
+      if (event.target.id === "artist-add-artwork") {
+        renderArtworkForm({});
+      }
+
       if (event.target.id === "artist-add-portfolio-page") {
         renderPortfolioPageForm({});
       }

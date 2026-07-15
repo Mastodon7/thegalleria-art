@@ -620,15 +620,30 @@
   }
 
   function renderDashboard() {
+    const pendingReviewCount = reviewItems().filter((item) => item.record.status === "pending_review").length;
+    const newInquiryCount = state.inquiries.filter((inquiry) => inquiry.status === "new").length;
+    const publishedArtistCount = state.artists.filter((artist) => artist.status === "published").length;
+    const draftPendingArtistCount = state.artists.filter((artist) => ["draft", "pending_review", "changes_requested", "approved"].includes(artist.status)).length;
+    const mediaFailureCount = state.media.filter((media) => media.status === "failed").length;
+    const overLimitCount = state.artistBilling.filter((entry) => entry.usageEvaluation?.status === "over_limit").length;
+    const pendingInvitationCount = state.invitations.filter((invitation) => invitation.status === "pending" || invitation.status === "invited").length;
     setText("artist-count", state.artists.length);
     setText("gallery-count", state.galleries.length);
     setText("artwork-count", state.artwork.length);
     setText("media-count", activeMedia().length);
-    setText("new-inquiry-count", state.inquiries.filter((inquiry) => inquiry.status === "new").length);
+    setText("new-inquiry-count", newInquiryCount);
     setText("inquiry-count", state.inquiries.length);
-    setText("pending-review-count", reviewItems().filter((item) => item.record.status === "pending_review").length);
+    setText("pending-review-count", pendingReviewCount);
     setText("changes-requested-count", reviewItems().filter((item) => item.record.status === "changes_requested").length);
-    setText("published-count", state.artists.filter((artist) => artist.status === "published").length);
+    setText("published-count", publishedArtistCount);
+    setText("beta-total-artists", state.artists.length);
+    setText("beta-published-artists", publishedArtistCount);
+    setText("beta-draft-pending-artists", draftPendingArtistCount);
+    setText("beta-pending-reviews", pendingReviewCount);
+    setText("beta-new-inquiries", newInquiryCount);
+    setText("beta-media-failures", mediaFailureCount);
+    setText("beta-over-limits", overLimitCount);
+    setText("beta-pending-invitations", pendingInvitationCount);
 
     const recentList = document.getElementById("admin-recent-inquiries");
     if (recentList) {
