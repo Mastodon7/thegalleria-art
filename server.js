@@ -50,6 +50,7 @@ const validArtistInvitationStatuses = new Set(["pending", "accepted", "expired",
 const validBillingStatuses = new Set(["trial", "active", "past_due", "canceled", "comped", "legacy", "demo", "not_configured"]);
 const validSubscriptionStatuses = new Set(["trialing", "active", "past_due", "canceled", "incomplete", "none", "not_configured"]);
 const validDomainStatuses = new Set(["not_configured", "pending_verification", "verified", "active", "error"]);
+const validPortfolioPageTypes = new Set(["cover", "artist_statement", "artwork_feature", "gallery_grid", "text_page", "contact_page"]);
 const reservedPublicSlugs = new Set([
   "admin",
   "artist",
@@ -285,7 +286,8 @@ function normalizeContent(content) {
     auditLog: Array.isArray(content.auditLog) ? content.auditLog : [],
     statusHistory: Array.isArray(content.statusHistory) ? content.statusHistory : [],
     artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : [],
-    redirects: Array.isArray(content.redirects) ? content.redirects : []
+    redirects: Array.isArray(content.redirects) ? content.redirects : [],
+    portfolioPages: Array.isArray(content.portfolioPages) ? content.portfolioPages : []
   };
 }
 
@@ -314,7 +316,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "plans", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "billingEvents", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts", "redirects"].forEach((collection) => {
+  ["artists", "plans", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "billingEvents", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts", "redirects", "portfolioPages"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -425,6 +427,40 @@ function ensurePhase18Defaults(content) {
   return changed;
 }
 
+function ensurePhase19Defaults(content) {
+  let changed = false;
+
+  content.portfolioPages.forEach((page) => {
+    [
+      ["subtitle", ""],
+      ["pageType", "text_page"],
+      ["galleryId", ""],
+      ["featuredImage", ""],
+      ["bodyContent", ""],
+      ["artworkIds", []],
+      ["mediaIds", []],
+      ["location", ""],
+      ["year", ""],
+      ["medium", ""],
+      ["dimensions", ""],
+      ["clientInfo", ""],
+      ["ctaLabel", ""],
+      ["ctaUrl", ""],
+      ["seoTitle", ""],
+      ["seoDescription", ""],
+      ["submittedAt", ""],
+      ["publishedAt", ""]
+    ].forEach(([key, value]) => {
+      if (page[key] === undefined) {
+        page[key] = Array.isArray(value) ? [] : value;
+        changed = true;
+      }
+    });
+  });
+
+  return changed;
+}
+
 function futureIso(days) {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -470,7 +506,8 @@ function ensureContentStore() {
   const generatedInvitations = ensureInvitationTokens(content);
   const phase16Defaults = ensurePhase16Defaults(content);
   const phase18Defaults = ensurePhase18Defaults(content);
-  const changed = mergedSeed || generatedInvitations || phase16Defaults || phase18Defaults;
+  const phase19Defaults = ensurePhase19Defaults(content);
+  const changed = mergedSeed || generatedInvitations || phase16Defaults || phase18Defaults || phase19Defaults;
   if (changed) {
     writeContent(content, { backup: true, reason: "seed-merge" });
   }
@@ -1158,6 +1195,14 @@ function optimizeArtworkForPublic(content, artwork) {
   };
 }
 
+function optimizePortfolioPageForPublic(content, page) {
+  return {
+    ...publicRecord(page),
+    featuredImage: resolveImagePath(content, page.featuredImage, "gallery"),
+    largeImage: resolveImagePath(content, page.featuredImage, "large")
+  };
+}
+
 function buildPublicData(content) {
   const artists = content.artists
     .filter((artist) => artist.status === "published")
@@ -1172,10 +1217,14 @@ function buildPublicData(content) {
             .sort(sortByDisplayOrder)
             .map((artwork) => optimizeArtworkForPublic(content, artwork))
         }));
+      const portfolioPages = content.portfolioPages
+        .filter((page) => page.artistId === artist.id && page.status === "published")
+        .sort(sortByDisplayOrder)
+        .map((page) => optimizePortfolioPageForPublic(content, page));
 
-      return { ...optimizeArtistForPublic(content, artist), galleries };
+      return { ...optimizeArtistForPublic(content, artist), galleries, portfolioPages };
     })
-    .filter((artist) => artist.galleries.length);
+    .filter((artist) => artist.galleries.length || artist.portfolioPages.length);
 
   return { artists };
 }
@@ -1192,7 +1241,12 @@ function publicContentWithArtist(content, artist) {
         .map((artwork) => optimizeArtworkForPublic(content, artwork))
     }));
 
-  return { ...optimizeArtistForPublic(content, artist), galleries };
+  const portfolioPages = content.portfolioPages
+    .filter((page) => page.artistId === artist.id && page.status === "published")
+    .sort(sortByDisplayOrder)
+    .map((page) => optimizePortfolioPageForPublic(content, page));
+
+  return { ...optimizeArtistForPublic(content, artist), galleries, portfolioPages };
 }
 
 function previewContentWithArtist(content, artist) {
@@ -1207,7 +1261,12 @@ function previewContentWithArtist(content, artist) {
         .map((artwork) => optimizeArtworkForPublic(content, artwork))
     }));
 
-  return { ...optimizeArtistForPublic(content, artist), galleries };
+  const portfolioPages = content.portfolioPages
+    .filter((page) => page.artistId === artist.id && page.status !== "archived")
+    .sort(sortByDisplayOrder)
+    .map((page) => optimizePortfolioPageForPublic(content, page));
+
+  return { ...optimizeArtistForPublic(content, artist), galleries, portfolioPages };
 }
 
 function publicPathForArtist(artist) {
@@ -1278,8 +1337,85 @@ function publicContentWithGallery(content, artist, gallery) {
         .filter((artwork) => artwork.galleryId === gallery.id && artwork.status === "published")
         .sort(sortByDisplayOrder)
         .map((artwork) => optimizeArtworkForPublic(content, artwork))
-    }]
+    }],
+    portfolioPages: content.portfolioPages
+      .filter((page) => page.artistId === artist.id && page.galleryId === gallery.id && page.status === "published")
+      .sort(sortByDisplayOrder)
+      .map((page) => optimizePortfolioPageForPublic(content, page))
   };
+}
+
+function portfolioPageImages(content, artist, page) {
+  const artworkImages = (page.artworkIds || [])
+    .map((id) => content.artwork.find((item) => item.id === id && item.artistId === artist.id && item.status === "published"))
+    .filter(Boolean)
+    .map((artwork) => ({
+      id: artwork.id,
+      title: artwork.title,
+      meta: [artwork.year, artwork.location, artwork.medium].filter(Boolean).join(" - "),
+      image: resolveImagePath(content, artwork.image, "gallery"),
+      largeImage: resolveImagePath(content, artwork.image, "large"),
+      artworkId: artwork.id
+    }));
+  const mediaImages = (page.mediaIds || [])
+    .map((id) => content.media.find((media) => media.id === id && media.status === "ready"))
+    .filter(Boolean)
+    .map((media) => ({
+      id: media.id,
+      title: media.originalFilename || media.publicPath,
+      meta: "",
+      image: mediaPath(media, "gallery"),
+      largeImage: mediaPath(media, "large") || mediaPath(media, "gallery")
+    }));
+  const featured = page.featuredImage ? [{
+    id: `${page.id}-featured`,
+    title: page.title,
+    meta: [page.year, page.location, page.medium].filter(Boolean).join(" - "),
+    image: page.featuredImage,
+    largeImage: page.largeImage || page.featuredImage
+  }] : [];
+  const bySrc = new Map([...featured, ...artworkImages, ...mediaImages].filter((item) => item.image).map((item) => [item.image, item]));
+  return [...bySrc.values()];
+}
+
+function renderPortfolioPageSection(content, artist, page, startIndex = 0) {
+  const images = portfolioPageImages(content, artist, page);
+  const meta = [page.year, page.location, page.medium, page.dimensions].filter(Boolean).join(" - ");
+  const copy = cleanString(page.bodyContent);
+  const copyHtml = copy
+    ? escapeHtml(copy)
+      .split(/\n{2,}/)
+      .map((paragraph) => `<p>${paragraph.replace(/\n/g, "<br>")}</p>`)
+      .join("")
+    : "";
+  const imageGrid = images.length ? `
+    <div class="dynamic-artwork-grid portfolio-page-grid">
+      ${images.map((image, index) => `
+        <article class="dynamic-artwork-card">
+          <button class="dynamic-lightbox-trigger" type="button" data-index="${startIndex + index}" data-src="${escapeHtml(image.largeImage || image.image)}" data-title="${escapeHtml(image.title)}" data-meta="${escapeHtml(image.meta)}"${image.artworkId ? ` data-artwork-id="${escapeHtml(image.artworkId)}"` : ""} aria-label="View ${escapeHtml(image.title)}">
+            <img src="${escapeHtml(image.image)}" alt="${escapeHtml(image.title)}" loading="lazy">
+          </button>
+        </article>
+      `).join("")}
+    </div>
+  ` : "";
+
+  return `
+    <section class="dynamic-gallery-section managed-portfolio-page page-type-${escapeHtml(page.pageType)}" aria-labelledby="portfolio-page-${escapeHtml(page.id)}">
+      <div class="section-inner">
+        <div class="section-heading">
+          <p class="section-kicker">${escapeHtml(page.pageType.replaceAll("_", " "))}</p>
+          <h2 id="portfolio-page-${escapeHtml(page.id)}">${escapeHtml(page.title)}</h2>
+        </div>
+        ${page.subtitle ? `<p class="dynamic-gallery-description">${escapeHtml(page.subtitle)}</p>` : ""}
+        ${meta ? `<p class="admin-muted">${escapeHtml(meta)}</p>` : ""}
+        ${copyHtml ? `<div class="managed-portfolio-copy">${copyHtml}</div>` : ""}
+        ${imageGrid}
+        ${page.clientInfo ? `<p class="admin-muted">${escapeHtml(page.clientInfo)}</p>` : ""}
+        ${page.ctaLabel && page.ctaUrl ? `<a class="home-button" href="${escapeHtml(page.ctaUrl)}">${escapeHtml(page.ctaLabel)}</a>` : ""}
+      </div>
+    </section>
+  `;
 }
 
 function metadataForArtist(content, artist, heroImage, options = {}) {
@@ -1301,13 +1437,15 @@ function metadataForArtist(content, artist, heroImage, options = {}) {
 
 function renderPublicArtistPage(artist, options = {}) {
   const galleries = artist.galleries || [];
+  const renderContent = loadContent();
   const primaryGallery = galleries[0] || {};
   const artworks = galleries.flatMap((gallery) =>
     (gallery.artworks || []).map((artwork) => ({ ...artwork, galleryTitle: gallery.title }))
   );
   const heroImage = primaryGallery.coverImage || artist.heroImage || artworks[0]?.image || "";
   const location = [artist.city, artist.region, artist.country].filter(Boolean).join(", ");
-  const metadata = metadataForArtist(loadContent(), artist, heroImage, {
+  const managedPages = (artist.portfolioPages || []).filter((page) => page.status === "published" || options.noindex);
+  const metadata = metadataForArtist(renderContent, artist, heroImage, {
     gallery: options.gallery || null,
     noindex: options.noindex
   });
@@ -1353,6 +1491,8 @@ function renderPublicArtistPage(artist, options = {}) {
         ${location ? `<p class="dynamic-artist-location">${escapeHtml(location)}</p>` : ""}
       </div>
     </section>
+
+    ${managedPages.map((page) => renderPortfolioPageSection(renderContent, artist, page)).join("")}
 
     <section class="dynamic-gallery-section" aria-labelledby="gallery-title">
       <div class="section-inner">
@@ -1472,7 +1612,7 @@ function sendPublicArtistPage(response, pathname) {
   }
 
   const publicArtist = publicContentWithArtist(content, artist);
-  if (!publicArtist.galleries.length) {
+  if (!publicArtist.galleries.length && !publicArtist.portfolioPages.length) {
     return false;
   }
 
@@ -1489,7 +1629,7 @@ function sendPublicGalleryPage(response, pathname) {
   }
 
   const publicArtist = publicContentWithGallery(content, match.artist, match.gallery);
-  if (!publicArtist.galleries[0]?.artworks?.length) {
+  if (!publicArtist.galleries[0]?.artworks?.length && !publicArtist.portfolioPages.length) {
     return false;
   }
 
@@ -2402,6 +2542,10 @@ function isValidImageReference(value) {
   return /^\/[^\s]+/.test(value) || /^https?:\/\/[^\s]+$/i.test(value);
 }
 
+function isSafePublicHref(value) {
+  return !value || /^\/(?!\/)[^\s]*$/.test(value) || /^#[^\s]*$/.test(value) || /^https?:\/\/[^\s]+$/i.test(value) || /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(value);
+}
+
 function isReadyUploadReference(content, value) {
   if (!value || !value.startsWith(`${uploadBasePath}/`)) {
     return true;
@@ -2466,6 +2610,10 @@ function collectionNameFor(resource) {
 
   if (resource === "gallery") {
     return "galleries";
+  }
+
+  if (resource === "portfolioPage") {
+    return "portfolioPages";
   }
 
   return "artists";
@@ -2896,6 +3044,108 @@ function validateGallery(input, content, existing) {
   };
 }
 
+function parseIdList(value) {
+  if (Array.isArray(value)) {
+    return value.map(cleanString).filter(Boolean);
+  }
+
+  return cleanString(value)
+    .split(",")
+    .map((item) => cleanString(item))
+    .filter(Boolean);
+}
+
+function validatePortfolioPage(input, content, existing, scope = {}) {
+  const errors = [];
+  const hasField = (name) => Object.prototype.hasOwnProperty.call(input, name);
+  const artistId = cleanString(scope.artistId || input.artistId || existing?.artistId);
+  const galleryId = cleanString(hasField("galleryId") ? input.galleryId : existing?.galleryId);
+  const artist = content.artists.find((item) => item.id === artistId);
+  const gallery = galleryId ? content.galleries.find((item) => item.id === galleryId && item.artistId === artistId) : null;
+  const title = cleanString(input.title);
+  const pageType = cleanString(input.pageType || existing?.pageType || "text_page");
+  const status = cleanString(input.status || existing?.status || "draft");
+  const featuredImage = cleanString(hasField("featuredImage") ? input.featuredImage : hasField("heroImage") ? input.heroImage : existing?.featuredImage);
+  const artworkIds = parseIdList(hasField("artworkIds") ? input.artworkIds : existing?.artworkIds);
+  const mediaIds = parseIdList(hasField("mediaIds") ? input.mediaIds : existing?.mediaIds);
+  const ctaUrl = cleanString(input.ctaUrl);
+
+  if (!artist) {
+    errors.push("Artist is required.");
+  }
+
+  if (!title) {
+    errors.push("Portfolio page title is required.");
+  }
+
+  if (!validPortfolioPageTypes.has(pageType)) {
+    errors.push("Portfolio page type is not valid.");
+  }
+
+  if (!hasValidStatus(status)) {
+    errors.push("Portfolio page status is not valid.");
+  }
+
+  if (galleryId && !gallery) {
+    errors.push("Selected gallery must belong to this artist.");
+  }
+
+  if (featuredImage && (!isValidImageReference(featuredImage) || !isReadyUploadReference(content, featuredImage))) {
+    errors.push("Featured image must be a ready uploaded image, existing image path, or image URL.");
+  }
+
+  if (!isSafePublicHref(ctaUrl)) {
+    errors.push("CTA URL must be an internal path, page anchor, email link, or http/https URL.");
+  }
+
+  artworkIds.forEach((id) => {
+    if (!content.artwork.some((item) => item.id === id && item.artistId === artistId && item.status !== "archived")) {
+      errors.push(`Related artwork was not found: ${id}`);
+    }
+  });
+
+  mediaIds.forEach((id) => {
+    if (!content.media.some((item) => item.id === id && item.ownerArtistId === artistId && item.status === "ready")) {
+      errors.push(`Related media was not found: ${id}`);
+    }
+  });
+
+  return {
+    errors,
+    record: {
+      id: existing?.id || generateId("portfolio-page"),
+      artistId,
+      galleryId,
+      title,
+      subtitle: cleanString(input.subtitle),
+      pageType,
+      displayOrder: Number(input.displayOrder || existing?.displayOrder || 0),
+      status,
+      featuredImage,
+      bodyContent: cleanLimitedString(input.bodyContent || input.description || "", 6000),
+      artworkIds,
+      mediaIds,
+      location: cleanString(input.location),
+      year: cleanString(input.year),
+      medium: cleanString(input.medium),
+      dimensions: cleanString(input.dimensions),
+      clientInfo: cleanString(input.clientInfo),
+      ctaLabel: cleanString(input.ctaLabel),
+      ctaUrl,
+      seoTitle: cleanLimitedString(hasField("seoTitle") ? input.seoTitle : existing?.seoTitle, 90),
+      seoDescription: cleanLimitedString(hasField("seoDescription") ? input.seoDescription : existing?.seoDescription, 180),
+      artistReviewNote: existing?.artistReviewNote || "",
+      adminReviewNote: existing?.adminReviewNote || "",
+      submittedAt: existing?.submittedAt || "",
+      publishedAt: status === "published" ? cleanString(existing?.publishedAt || nowIso()) : cleanString(existing?.publishedAt),
+      protected: Boolean(existing?.protected),
+      demo: Boolean(existing?.demo),
+      createdAt: existing?.createdAt || nowIso(),
+      updatedAt: nowIso()
+    }
+  };
+}
+
 function validateArtwork(input, content, existing) {
   const errors = [];
   const title = cleanString(input.title);
@@ -2965,7 +3215,8 @@ function upsertRecord(resource, input) {
   const validators = {
     artist: validateArtist,
     gallery: validateGallery,
-    artwork: validateArtwork
+    artwork: validateArtwork,
+    portfolioPage: validatePortfolioPage
   };
   const { errors, record } = validators[resource](input, content, existing);
 
@@ -3123,7 +3374,34 @@ function upsertRecord(resource, input) {
     });
   }
 
-  if ((resource === "artist" || resource === "gallery" || resource === "artwork") && record.artistId) {
+  if (existing && resource === "portfolioPage" && Number(existing.displayOrder || 0) !== Number(record.displayOrder || 0)) {
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action: "portfolioPage.reordered",
+      targetType: "portfolio-page",
+      targetId: record.id,
+      summary: `Portfolio page reordered: ${record.title}`
+    });
+  }
+
+  if (existing && resource === "portfolioPage" && existing.status !== record.status) {
+    const action = record.status === "published"
+      ? "portfolioPage.published"
+      : existing.status === "published"
+        ? "portfolioPage.unpublished"
+        : `portfolioPage.status.${record.status}`;
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action,
+      targetType: "portfolio-page",
+      targetId: record.id,
+      summary: `Portfolio page status changed to ${record.status}: ${record.title}`
+    });
+  }
+
+  if ((resource === "artist" || resource === "gallery" || resource === "artwork" || resource === "portfolioPage") && record.artistId) {
     const artist = content.artists.find((item) => item.id === record.artistId);
     if (artist) {
       addLimitThresholdNotifications(content, artist, usageEvaluation(content, artist));
@@ -3190,7 +3468,8 @@ function isMediaInUse(content, publicPath) {
 
   return content.artists.some((artist) => matches(artist.heroImage) || matches(artist.profileImage)) ||
     content.galleries.some((gallery) => matches(gallery.coverImage)) ||
-    content.artwork.some((artwork) => matches(artwork.image));
+    content.artwork.some((artwork) => matches(artwork.image)) ||
+    content.portfolioPages.some((page) => matches(page.featuredImage) || (page.mediaIds || []).some((id) => media?.id === id));
 }
 
 function handleMediaUpload(request, response, options = {}) {
@@ -4455,6 +4734,10 @@ function collectionForReviewType(content, type) {
     return content.artwork;
   }
 
+  if (type === "portfolio-page") {
+    return content.portfolioPages;
+  }
+
   return null;
 }
 
@@ -4491,7 +4774,7 @@ function transitionReviewRecord(content, type, record, nextStatus, changedBy, no
 function reviewQueueItems(content) {
   const items = [];
 
-  ["artist", "gallery", "artwork"].forEach((type) => {
+  ["artist", "gallery", "artwork", "portfolio-page"].forEach((type) => {
     const collection = collectionForReviewType(content, type) || [];
     collection.forEach((record) => {
       if (["pending_review", "changes_requested", "approved"].includes(record.status)) {
@@ -4564,6 +4847,16 @@ function submitReviewRecord(context, type, id, input) {
     targetId: record.id,
     summary: `${recordTitle(record, type)} submitted for review`
   });
+  if (type === "portfolio-page") {
+    addAuditEvent(content, {
+      actorType: "artist",
+      actorId: context.account.email,
+      action: "portfolioPage.submitted",
+      targetType: "portfolio-page",
+      targetId: record.id,
+      summary: `Portfolio page submitted for review: ${recordTitle(record, type)}`
+    });
+  }
   queueReviewSubmittedEmail(content, type, record);
   trimOperationalLogs(content);
   saveContent(content, "review-submit");
@@ -4618,7 +4911,8 @@ function adminReviewRecord(type, id, input, session) {
     reviewedAt: now,
     reviewedByAdminId: session?.email || adminEmail,
     adminReviewNote: note,
-    reviewUpdatedAt: now
+    reviewUpdatedAt: now,
+    ...(type === "portfolio-page" && action === "published" ? { publishedAt: now } : {})
   });
 
   const artistId = reviewRecordArtistId(record, type);
@@ -4640,6 +4934,16 @@ function adminReviewRecord(type, id, input, session) {
     targetId: record.id,
     summary: `${recordTitle(record, type)} marked ${action}`
   });
+  if (type === "portfolio-page") {
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: session?.email || adminEmail,
+      action: `portfolioPage.${action}`,
+      targetType: "portfolio-page",
+      targetId: record.id,
+      summary: `Portfolio page marked ${action}: ${recordTitle(record, type)}`
+    });
+  }
   queueReviewDecisionEmail(content, type, record, action, note);
   trimOperationalLogs(content);
   saveContent(content, "review-admin-action");
@@ -4767,13 +5071,17 @@ function getArtistContext(request) {
 }
 
 function artistScopedMedia(content, artist, galleries, artwork) {
+  const portfolioPages = content.portfolioPages.filter((page) => page.artistId === artist.id && page.status !== "archived");
   const paths = new Set([
     artist.heroImage,
     artist.profileImage,
     ...galleries.map((gallery) => gallery.coverImage),
-    ...artwork.map((item) => item.image)
+    ...artwork.map((item) => item.image),
+    ...portfolioPages.map((page) => page.featuredImage)
   ].filter(Boolean));
+  const mediaIds = new Set(portfolioPages.flatMap((page) => page.mediaIds || []));
   const mediaRecords = content.media.filter((media) =>
+    mediaIds.has(media.id) ||
     media.ownerArtistId === artist.id ||
     [...paths].some((imagePath) => mediaContainsPath(media, imagePath))
   );
@@ -4806,10 +5114,14 @@ function buildArtistPortalContent(context) {
   const artwork = context.content.artwork
     .filter((item) => item.artistId === context.artist.id && galleryIds.has(item.galleryId))
     .sort(sortByDisplayOrder);
+  const portfolioPages = context.content.portfolioPages
+    .filter((page) => page.artistId === context.artist.id && page.status !== "archived")
+    .sort(sortByDisplayOrder);
   const ownedIds = new Set([
     context.artist.id,
     ...galleries.map((gallery) => gallery.id),
-    ...artwork.map((item) => item.id)
+    ...artwork.map((item) => item.id),
+    ...portfolioPages.map((page) => page.id)
   ]);
 
   return {
@@ -4825,6 +5137,7 @@ function buildArtistPortalContent(context) {
     billing: billingSnapshot(context.content, context.artist),
     galleries,
     artwork,
+    portfolioPages,
     media: artistScopedMedia(context.content, context.artist, galleries, artwork),
     inquiries: artistScopedInquiries(context.content, context.artist.id),
     notifications: context.content.notifications
@@ -5507,6 +5820,58 @@ function updateArtistArtwork(context, id, input) {
   return { ok: true, statusCode: 200, message: "Artwork saved.", context: { ...context, content } };
 }
 
+function upsertArtistPortfolioPage(context, id, input) {
+  const content = loadContent();
+  const existing = id ? content.portfolioPages.find((page) => page.id === id && page.artistId === context.artist.id) : null;
+  const statusInput = existing?.status === "published" || existing?.status === "approved" ? "draft" : (input.status || existing?.status || "draft");
+  const { errors, record } = validatePortfolioPage({ ...input, status: statusInput }, content, existing, { artistId: context.artist.id });
+
+  if (errors.length) {
+    return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors, content };
+  }
+
+  record.artistId = context.artist.id;
+  record.adminReviewNote = "";
+  if (existing) {
+    const index = content.portfolioPages.findIndex((page) => page.id === existing.id);
+    content.portfolioPages[index] = { ...existing, ...record, protected: existing.protected };
+  } else {
+    content.portfolioPages.push(record);
+  }
+
+  addAuditEvent(content, {
+    actorType: context.support?.active ? "admin_support" : "artist",
+    actorId: context.support?.adminEmail || context.account.email,
+    action: existing ? "portfolioPage.updated" : "portfolioPage.created",
+    targetType: "portfolio-page",
+    targetId: record.id,
+    summary: `${existing ? "Updated" : "Created"} portfolio page ${record.title}`
+  });
+  if (existing && Number(existing.displayOrder || 0) !== Number(record.displayOrder || 0)) {
+    addAuditEvent(content, {
+      actorType: context.support?.active ? "admin_support" : "artist",
+      actorId: context.support?.adminEmail || context.account.email,
+      action: "portfolioPage.reordered",
+      targetType: "portfolio-page",
+      targetId: record.id,
+      summary: `Portfolio page reordered: ${record.title}`
+    });
+  }
+  if (context.support?.active) {
+    addAuditEvent(content, {
+      actorType: "admin_support",
+      actorId: context.support.adminEmail,
+      action: "support.portfolioPage.updated",
+      targetType: "portfolio-page",
+      targetId: record.id,
+      summary: `Support edited portfolio page ${record.title}`
+    });
+  }
+  trimOperationalLogs(content);
+  saveContent(content, "artist-portfolio-page-save");
+  return { ok: true, statusCode: 200, message: "Portfolio page saved.", content };
+}
+
 async function handleArtistApi(request, response, pathname) {
   const context = requireArtistForApi(request, response);
   if (!context) {
@@ -5607,6 +5972,21 @@ async function handleArtistApi(request, response, pathname) {
     return;
   }
 
+  const portfolioPageMatch = pathname.match(/^\/artist\/api\/portfolio-pages\/([^/]+)$/);
+  if (request.method === "POST" && portfolioPageMatch) {
+    collectJson(request, response, (input) => {
+      const pageId = decodeURIComponent(portfolioPageMatch[1]);
+      const result = upsertArtistPortfolioPage(context, pageId === "new" ? "" : pageId, input);
+      sendJson(response, result.statusCode, {
+        ok: result.ok,
+        message: result.message,
+        errors: result.errors || [],
+        content: result.content ? buildArtistPortalContent({ ...context, content: result.content }) : buildArtistPortalContent(context)
+      });
+    });
+    return;
+  }
+
   const inquiryMatch = pathname.match(/^\/artist\/api\/inquiries\/([^/]+)$/);
   if (request.method === "POST" && inquiryMatch) {
     collectJson(request, response, (input) => {
@@ -5620,7 +6000,7 @@ async function handleArtistApi(request, response, pathname) {
     return;
   }
 
-  const reviewSubmitMatch = pathname.match(/^\/artist\/api\/review\/(artist|gallery|artwork)\/([^/]+)\/submit$/);
+  const reviewSubmitMatch = pathname.match(/^\/artist\/api\/review\/(artist|gallery|artwork|portfolio-page)\/([^/]+)\/submit$/);
   if (request.method === "POST" && reviewSubmitMatch) {
     collectJson(request, response, (input) => {
       const type = reviewSubmitMatch[1];
@@ -5792,9 +6172,9 @@ function handleAdminApi(request, response, pathname) {
     return;
   }
 
-  const saveMatch = pathname.match(/^\/admin\/api\/(artists|galleries|artwork)$/);
+  const saveMatch = pathname.match(/^\/admin\/api\/(artists|galleries|artwork|portfolio-pages)$/);
   if (request.method === "POST" && saveMatch) {
-    const resource = saveMatch[1] === "artists" ? "artist" : saveMatch[1] === "galleries" ? "gallery" : "artwork";
+    const resource = saveMatch[1] === "artists" ? "artist" : saveMatch[1] === "galleries" ? "gallery" : saveMatch[1] === "portfolio-pages" ? "portfolioPage" : "artwork";
     collectJson(request, response, (input) => {
       const result = upsertRecord(resource, input);
       sendJson(response, result.statusCode, {
@@ -5807,9 +6187,9 @@ function handleAdminApi(request, response, pathname) {
     return;
   }
 
-  const archiveMatch = pathname.match(/^\/admin\/api\/(artists|galleries|artwork)\/([^/]+)\/archive$/);
+  const archiveMatch = pathname.match(/^\/admin\/api\/(artists|galleries|artwork|portfolio-pages)\/([^/]+)\/archive$/);
   if (request.method === "POST" && archiveMatch) {
-    const resource = archiveMatch[1] === "artists" ? "artist" : archiveMatch[1] === "galleries" ? "gallery" : "artwork";
+    const resource = archiveMatch[1] === "artists" ? "artist" : archiveMatch[1] === "galleries" ? "gallery" : archiveMatch[1] === "portfolio-pages" ? "portfolioPage" : "artwork";
     const result = archiveRecord(resource, decodeURIComponent(archiveMatch[2]));
     sendJson(response, result.statusCode, {
       ok: result.ok,
@@ -5869,7 +6249,7 @@ function handleAdminApi(request, response, pathname) {
     return;
   }
 
-  const reviewActionMatch = pathname.match(/^\/admin\/api\/review\/(artist|gallery|artwork)\/([^/]+)$/);
+  const reviewActionMatch = pathname.match(/^\/admin\/api\/review\/(artist|gallery|artwork|portfolio-page)\/([^/]+)$/);
   if (request.method === "POST" && reviewActionMatch) {
     collectJson(request, response, (input) => {
       const result = adminReviewRecord(reviewActionMatch[1], decodeURIComponent(reviewActionMatch[2]), input, adminSession);

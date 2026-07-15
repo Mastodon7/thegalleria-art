@@ -5,12 +5,14 @@
   const billingStatusOptions = ["trial", "active", "past_due", "canceled", "comped", "legacy", "demo", "not_configured"];
   const subscriptionStatusOptions = ["trialing", "active", "past_due", "canceled", "incomplete", "none", "not_configured"];
   const invitationOptions = ["current", "invited", "pending", "accepted", "none"];
+  const portfolioPageTypeOptions = ["cover", "artist_statement", "artwork_feature", "gallery_grid", "text_page", "contact_page"];
   const inquiryStatusOptions = ["new", "reviewed", "replied", "archived", "spam"];
   const state = {
     artists: [],
     plans: [],
     galleries: [],
     artwork: [],
+    portfolioPages: [],
     media: [],
     inquiries: [],
     invitations: [],
@@ -231,7 +233,8 @@
     return [
       ...state.artists.map((record) => ({ type: "artist", record, artistId: record.id, title: record.name })),
       ...state.galleries.map((record) => ({ type: "gallery", record, artistId: record.artistId, title: record.title })),
-      ...state.artwork.map((record) => ({ type: "artwork", record, artistId: record.artistId, title: record.title }))
+      ...state.artwork.map((record) => ({ type: "artwork", record, artistId: record.artistId, title: record.title })),
+      ...state.portfolioPages.map((record) => ({ type: "portfolio-page", record, artistId: record.artistId, title: record.title }))
     ]
       .filter((item) => ["pending_review", "changes_requested", "approved"].includes(item.record.status))
       .sort((left, right) => String(right.record.submittedAt || right.record.updatedAt || "").localeCompare(String(left.record.submittedAt || left.record.updatedAt || "")));
@@ -500,6 +503,7 @@
     state.plans = content.plans || [];
     state.galleries = content.galleries || [];
     state.artwork = content.artwork || [];
+    state.portfolioPages = content.portfolioPages || [];
     state.media = content.media || [];
     state.inquiries = content.inquiries || [];
     state.invitations = content.invitations || [];
@@ -1246,6 +1250,103 @@
     renderArtworkForm(state.artwork[0] || {});
   }
 
+  function renderPortfolioPageFilters() {
+    const artistFilter = document.getElementById("portfolio-page-artist-filter");
+    const statusFilter = document.getElementById("portfolio-page-status-filter");
+    const typeFilter = document.getElementById("portfolio-page-type-filter");
+    if (artistFilter) {
+      const selected = artistFilter.value;
+      artistFilter.innerHTML = `<option value="">All artists</option>${state.artists.map((artist) => `<option value="${attr(artist.id)}"${artist.id === selected ? " selected" : ""}>${escapeHtml(artist.name)}</option>`).join("")}`;
+    }
+    if (statusFilter) {
+      const selected = statusFilter.value;
+      statusFilter.innerHTML = `<option value="">All statuses</option>${statusOptions.map((status) => `<option value="${attr(status)}"${status === selected ? " selected" : ""}>${escapeHtml(status)}</option>`).join("")}`;
+    }
+    if (typeFilter) {
+      const selected = typeFilter.value;
+      typeFilter.innerHTML = `<option value="">All types</option>${portfolioPageTypeOptions.map((type) => `<option value="${attr(type)}"${type === selected ? " selected" : ""}>${escapeHtml(type.replaceAll("_", " "))}</option>`).join("")}`;
+    }
+  }
+
+  function filteredPortfolioPages() {
+    const search = String(document.getElementById("portfolio-page-search")?.value || "").toLowerCase();
+    const artistId = document.getElementById("portfolio-page-artist-filter")?.value || "";
+    const status = document.getElementById("portfolio-page-status-filter")?.value || "";
+    const pageType = document.getElementById("portfolio-page-type-filter")?.value || "";
+    return state.portfolioPages
+      .filter((page) => !artistId || page.artistId === artistId)
+      .filter((page) => !status || page.status === status)
+      .filter((page) => !pageType || page.pageType === pageType)
+      .filter((page) => !search || [page.title, page.subtitle, artistById(page.artistId)?.name].filter(Boolean).join(" ").toLowerCase().includes(search))
+      .sort((left, right) => Number(left.displayOrder || 0) - Number(right.displayOrder || 0));
+  }
+
+  function renderPortfolioPageForm(page = {}) {
+    const form = document.getElementById("portfolio-page-form");
+    if (!form) {
+      return;
+    }
+
+    const artistOptions = state.artists.map((artist) => ({ value: artist.id, label: artist.name }));
+    const selectedArtistId = page.artistId || artistOptions[0]?.value || "";
+    const galleryOptions = state.galleries
+      .filter((gallery) => !selectedArtistId || gallery.artistId === selectedArtistId)
+      .map((gallery) => ({ value: gallery.id, label: gallery.title }));
+    form.innerHTML = `
+      <input name="id" type="hidden" value="${attr(page.id)}">
+      ${field("title", "Title", page.title)}
+      ${field("subtitle", "Subtitle", page.subtitle)}
+      ${select("artistId", "Artist", selectedArtistId, artistOptions)}
+      ${select("galleryId", "Gallery Optional", page.galleryId || "", [{ value: "", label: "No gallery" }, ...galleryOptions])}
+      ${select("pageType", "Page Type", page.pageType || "text_page", portfolioPageTypeOptions.map((type) => ({ value: type, label: type.replaceAll("_", " ") })))}
+      ${select("status", "Status", page.status || "draft", statusOptions.map((status) => ({ value: status, label: status })))}
+      ${imageField("featuredImage", "Featured / Hero Image", page.featuredImage)}
+      ${textarea("bodyContent", "Body Content", page.bodyContent)}
+      ${field("artworkIds", "Artwork IDs Comma Separated", (page.artworkIds || []).join(", "))}
+      ${field("mediaIds", "Media IDs Comma Separated", (page.mediaIds || []).join(", "))}
+      ${field("year", "Year", page.year)}
+      ${field("location", "Location", page.location)}
+      ${field("medium", "Medium", page.medium)}
+      ${field("dimensions", "Dimensions", page.dimensions)}
+      ${field("clientInfo", "Client / Commission Info", page.clientInfo)}
+      ${field("displayOrder", "Display Order", page.displayOrder || 0, "number")}
+      ${field("ctaLabel", "CTA Label", page.ctaLabel)}
+      ${field("ctaUrl", "CTA URL", page.ctaUrl)}
+      ${field("seoTitle", "SEO Title", page.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", page.seoDescription)}
+    `;
+  }
+
+  function renderPortfolioPages() {
+    const table = document.getElementById("portfolio-pages-table");
+    if (!table) {
+      return;
+    }
+
+    renderPortfolioPageFilters();
+    const pages = filteredPortfolioPages();
+    table.innerHTML = pages.length ? pages.map((page) => {
+      const artist = artistById(page.artistId);
+      return `
+        <tr>
+          <td>${escapeHtml(page.title)}<br><span class="admin-muted">${escapeHtml(page.subtitle || "")}</span></td>
+          <td>${escapeHtml(artist?.name || "")}</td>
+          <td>${escapeHtml((page.pageType || "").replaceAll("_", " "))}</td>
+          <td>${badge(page.status || "draft")}</td>
+          <td>${escapeHtml(page.displayOrder || 0)}</td>
+          <td>${escapeHtml(formatDate(page.updatedAt))}</td>
+          <td class="admin-actions">
+            <button type="button" data-edit-portfolio-page="${attr(page.id)}">Edit</button>
+            ${artist ? `<a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview</a>` : ""}
+            <button type="button" data-archive-portfolio-page="${attr(page.id)}">Archive</button>
+          </td>
+        </tr>
+      `;
+    }).join("") : '<tr><td colspan="7">No portfolio pages match these filters.</td></tr>';
+
+    renderPortfolioPageForm(pages[0] || {});
+  }
+
   function renderMedia() {
     const grid = document.getElementById("media-grid");
     if (!grid) {
@@ -1514,6 +1615,7 @@
     renderArtists();
     renderGalleries();
     renderArtwork();
+    renderPortfolioPages();
     renderMedia();
     renderInquiries();
     renderInvitations();
@@ -1700,6 +1802,8 @@
       const copyStripeWebhook = event.target.closest("#copy-stripe-webhook-endpoint");
       const userView = event.target.closest("[data-view-user]");
       const supportArtist = event.target.closest("[data-support-artist]");
+      const portfolioPageEdit = event.target.closest("[data-edit-portfolio-page]");
+      const portfolioPageArchive = event.target.closest("[data-archive-portfolio-page]");
 
       if (artistEdit) {
         renderArtistForm(state.artists.find((artist) => artist.id === artistEdit.dataset.editArtist) || {});
@@ -1758,8 +1862,17 @@
       if (supportArtist) {
         startSupport(supportArtist.dataset.supportArtist);
       }
+      if (portfolioPageEdit) {
+        renderPortfolioPageForm(state.portfolioPages.find((page) => page.id === portfolioPageEdit.dataset.editPortfolioPage) || {});
+      }
+      if (portfolioPageArchive) {
+        archive(portfolioPageArchive.dataset.archivePortfolioPage, "/admin/api/portfolio-pages");
+      }
       if (event.target.id === "add-artist") {
         renderArtistForm({});
+      }
+      if (event.target.id === "add-portfolio-page") {
+        renderPortfolioPageForm({});
       }
       if (event.target.id === "add-plan") {
         renderPlanForm({});
@@ -1777,6 +1890,7 @@
       const inquiryFilter = event.target.closest("#inquiry-status-filter, #inquiry-artist-filter");
       const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
       const userFilter = event.target.closest("#users-account-filter, #users-plan-filter, #users-billing-filter");
+      const portfolioFilter = event.target.closest("#portfolio-page-artist-filter, #portfolio-page-status-filter, #portfolio-page-type-filter");
       if (mediaSelect?.value) {
         const input = document.querySelector(`[name="${mediaSelect.dataset.mediaSelect}"]`);
         if (input) {
@@ -1795,12 +1909,16 @@
         state.selectedUserArtistId = "";
         renderUsers();
       }
+      if (portfolioFilter) {
+        renderPortfolioPages();
+      }
     });
 
     document.addEventListener("input", (event) => {
       const imageInput = event.target.closest("[data-image-input]");
       const auditFilter = event.target.closest("#audit-action-filter, #audit-target-filter");
       const userSearch = event.target.closest("#users-search");
+      const portfolioSearch = event.target.closest("#portfolio-page-search");
       if (imageInput) {
         updateImagePreview(imageInput.dataset.imageInput, imageInput.value);
       }
@@ -1811,12 +1929,16 @@
         state.selectedUserArtistId = "";
         renderUsers();
       }
+      if (portfolioSearch) {
+        renderPortfolioPages();
+      }
     });
 
     const artistForm = document.getElementById("artist-form");
     const galleryForm = document.getElementById("gallery-form");
     const artworkForm = document.getElementById("artwork-form");
     const planForm = document.getElementById("plan-form");
+    const portfolioPageForm = document.getElementById("portfolio-page-form");
     const mediaUploadForm = document.getElementById("media-upload-form");
     const invitationForm = document.getElementById("invitation-form");
 
@@ -1838,6 +1960,11 @@
     planForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       savePlan(planForm);
+    });
+
+    portfolioPageForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      save("portfolioPage", portfolioPageForm, "/admin/api/portfolio-pages");
     });
 
     mediaUploadForm?.addEventListener("submit", (event) => {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Plans | The Galleria.Art Admin</title>
+  <title>Portfolio Pages | The Galleria.Art Admin</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="admin-page">
@@ -16,13 +16,13 @@
         <a href="/admin/users/">Users</a>
         <a href="/admin/artists/">Artists</a>
         <a href="/admin/galleries/">Galleries</a>
-        <a href="/admin/portfolio-pages/">Portfolio Pages</a>
+        <a aria-current="page" href="/admin/portfolio-pages/">Portfolio Pages</a>
         <a href="/admin/artwork/">Artwork</a>
         <a href="/admin/media/">Media</a>
         <a href="/admin/inquiries/">Inquiries</a>
         <a href="/admin/invitations/">Invitations</a>
         <a href="/admin/review/">Review</a>
-        <a href="/admin/plans/" aria-current="page">Plans</a>
+        <a href="/admin/plans/">Plans</a>
         <a href="/admin/audit/">Audit</a>
         <a href="/admin/settings/">Settings</a>
       </nav>
@@ -31,42 +31,50 @@
       </form>
     </header>
 
-    <main class="admin-dashboard" aria-labelledby="plans-title">
+    <main class="admin-dashboard" aria-labelledby="portfolio-pages-title">
       <div class="admin-dashboard-heading">
         <div>
-          <p class="section-kicker">Billing Foundation</p>
-          <h1 id="plans-title">Plans</h1>
-          <p class="admin-muted">Logged in as {{ADMIN_EMAIL}}</p>
+          <p class="section-kicker">Page Builder</p>
+          <h1 id="portfolio-pages-title">Portfolio Pages</h1>
+          <p class="admin-muted">Create, order, preview, and publish managed artist portfolio pages.</p>
         </div>
-        <button class="admin-primary-action" id="add-plan" type="button">Add Plan</button>
+        <button class="admin-primary-action" id="add-portfolio-page" type="button">Add Page</button>
       </div>
 
       <section class="admin-panel">
-        <h2>Plan List</h2>
+        <h2>Filters</h2>
+        <div class="inquiry-filter-grid">
+          <label><span>Search</span><input id="portfolio-page-search" type="search" placeholder="Search by title"></label>
+          <label><span>Artist</span><select id="portfolio-page-artist-filter"><option value="">All artists</option></select></label>
+          <label><span>Status</span><select id="portfolio-page-status-filter"><option value="">All statuses</option></select></label>
+          <label><span>Type</span><select id="portfolio-page-type-filter"><option value="">All types</option></select></label>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Pages</h2>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Slug</th>
-                <th>Monthly</th>
-                <th>Annual</th>
+                <th>Title</th>
+                <th>Artist</th>
+                <th>Type</th>
                 <th>Status</th>
-                <th>Limits</th>
-                <th>Stripe Mapping</th>
                 <th>Order</th>
+                <th>Updated</th>
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="plans-table"></tbody>
+            <tbody id="portfolio-pages-table"></tbody>
           </table>
         </div>
       </section>
 
       <section class="admin-panel">
-        <h2>Plan Edit</h2>
-        <form class="admin-record-form" id="plan-form"></form>
-        <button class="admin-primary-action" type="submit" form="plan-form">Save Plan</button>
+        <h2>Editor</h2>
+        <form class="admin-record-form" id="portfolio-page-form"></form>
+        <button class="admin-primary-action" type="submit" form="portfolio-page-form">Save Page</button>
       </section>
     </main>
   </div>

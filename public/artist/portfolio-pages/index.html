@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Artist Inquiries | The Galleria.Art</title>
+  <title>Artist Portfolio Pages | The Galleria.Art</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="admin-page artist-portal-page" data-artist-view="inquiries">
+<body class="admin-page artist-portal-page" data-artist-view="portfolio-pages">
   <div class="admin-shell">
     <header class="admin-header">
       <a class="brand-link" href="/">The Galleria.Art</a>
@@ -15,10 +15,10 @@
         <a href="/artist/">Dashboard</a>
         <a href="/artist/profile/">Profile</a>
         <a href="/artist/galleries/">Galleries</a>
-        <a href="/artist/portfolio-pages/">Portfolio Pages</a>
+        <a aria-current="page" href="/artist/portfolio-pages/">Portfolio Pages</a>
         <a href="/artist/artwork/">Artwork</a>
         <a href="/artist/media/">Media</a>
-        <a aria-current="page" href="/artist/inquiries/">Inquiries</a>
+        <a href="/artist/inquiries/">Inquiries</a>
         <a href="/artist/billing/">Billing</a>
         <a id="artist-public-view" href="/">Public View</a>
       </nav>
@@ -27,37 +27,37 @@
       </form>
     </header>
 
-    <main class="admin-dashboard" aria-labelledby="artist-inquiries-title">
+    <main class="admin-dashboard" aria-labelledby="artist-portfolio-pages-title">
       <div class="admin-dashboard-heading">
         <div>
           <p class="section-kicker">Artist Portal</p>
-          <h1 id="artist-inquiries-title">Inquiries</h1>
+          <h1 id="artist-portfolio-pages-title">Portfolio Pages</h1>
           <p class="admin-muted">Logged in as {{ARTIST_EMAIL}}</p>
         </div>
+        <button class="admin-primary-action" id="artist-add-portfolio-page" type="button">Add Page</button>
       </div>
-
-      <section class="admin-panel" aria-labelledby="artist-inquiry-list-title">
-        <h2 id="artist-inquiry-list-title">Collector Inquiries</h2>
+      <section class="admin-panel">
+        <h2>Your Portfolio Pages</h2>
         <div class="admin-table-wrap">
-          <table class="admin-table inquiry-table">
+          <table class="admin-table">
             <thead>
               <tr>
-                <th>Visitor</th>
-                <th>Related To</th>
+                <th>Title</th>
+                <th>Type</th>
                 <th>Status</th>
-                <th>Created</th>
-                <th>Message</th>
+                <th>Order</th>
+                <th>Updated</th>
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="artist-inquiries-table"></tbody>
+            <tbody id="artist-portfolio-pages-table"></tbody>
           </table>
         </div>
       </section>
-
-      <section class="admin-panel" aria-labelledby="artist-inquiry-detail-title">
-        <h2 id="artist-inquiry-detail-title">Inquiry Detail</h2>
-        <div id="artist-inquiry-detail"></div>
+      <section class="admin-panel">
+        <h2>Editor</h2>
+        <form class="admin-record-form" id="artist-portfolio-page-form"></form>
+        <button class="admin-primary-action" type="submit" form="artist-portfolio-page-form">Save Page</button>
       </section>
     </main>
   </div>

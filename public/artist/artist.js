@@ -6,6 +6,7 @@
     billing: {},
     galleries: [],
     artwork: [],
+    portfolioPages: [],
     media: [],
     inquiries: [],
     notifications: [],
@@ -13,6 +14,7 @@
     selectedInquiryId: ""
   };
   const inquiryStatusOptions = ["new", "reviewed", "replied", "archived"];
+  const portfolioPageTypeOptions = ["cover", "artist_statement", "artwork_feature", "gallery_grid", "text_page", "contact_page"];
 
   function escapeHtml(value) {
     return String(value || "")
@@ -61,7 +63,8 @@
     return [
       { type: "artist", record: state.artist, title: state.artist.name || "Artist profile" },
       ...state.galleries.map((record) => ({ type: "gallery", record, title: record.title })),
-      ...state.artwork.map((record) => ({ type: "artwork", record, title: record.title }))
+      ...state.artwork.map((record) => ({ type: "artwork", record, title: record.title })),
+      ...state.portfolioPages.map((record) => ({ type: "portfolio-page", record, title: record.title }))
     ];
   }
 
@@ -284,6 +287,7 @@
     state.billing = content.billing || {};
     state.galleries = content.galleries || [];
     state.artwork = content.artwork || [];
+    state.portfolioPages = content.portfolioPages || [];
     state.media = content.media || [];
     state.inquiries = content.inquiries || [];
     state.notifications = content.notifications || [];
@@ -771,6 +775,69 @@
     renderArtworkForm();
   }
 
+  function renderPortfolioPageForm(page = state.portfolioPages[0] || {}) {
+    const form = document.getElementById("artist-portfolio-page-form");
+    if (!form) {
+      return;
+    }
+
+    const galleryOptions = state.galleries.map((gallery) => ({ value: gallery.id, label: gallery.title }));
+    form.dataset.portfolioPageId = page.id || "";
+    form.innerHTML = `
+      ${field("title", "Title", page.title)}
+      ${field("subtitle", "Subtitle", page.subtitle)}
+      ${select("galleryId", "Gallery Optional", page.galleryId || "", [{ value: "", label: "No gallery" }, ...galleryOptions])}
+      ${select("pageType", "Page Type", page.pageType || "text_page", portfolioPageTypeOptions.map((type) => ({ value: type, label: type.replaceAll("_", " ") })))}
+      ${imageField("featuredImage", "Featured / Hero Image", page.featuredImage)}
+      ${textarea("bodyContent", "Body Content", page.bodyContent)}
+      ${field("artworkIds", "Artwork IDs Comma Separated", (page.artworkIds || []).join(", "))}
+      ${field("mediaIds", "Media IDs Comma Separated", (page.mediaIds || []).join(", "))}
+      ${field("year", "Year", page.year)}
+      ${field("location", "Location", page.location)}
+      ${field("medium", "Medium", page.medium)}
+      ${field("dimensions", "Dimensions", page.dimensions)}
+      ${field("clientInfo", "Client / Commission Info", page.clientInfo)}
+      ${field("displayOrder", "Display Order", page.displayOrder || 0, "number")}
+      ${field("ctaLabel", "CTA Label", page.ctaLabel)}
+      ${field("ctaUrl", "CTA URL", page.ctaUrl)}
+      ${field("seoTitle", "SEO Title", page.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", page.seoDescription)}
+    `;
+  }
+
+  function renderPortfolioPages() {
+    const table = document.getElementById("artist-portfolio-pages-table");
+    if (!table) {
+      return;
+    }
+
+    const pages = state.portfolioPages
+      .slice()
+      .sort((left, right) => Number(left.displayOrder || 0) - Number(right.displayOrder || 0));
+
+    table.innerHTML = pages.length ? pages.map((page) => `
+      <tr>
+        <td>${escapeHtml(page.title)}<br><span class="admin-muted">${escapeHtml(page.subtitle || "")}</span></td>
+        <td>${escapeHtml((page.pageType || "").replaceAll("_", " "))}</td>
+        <td>${badge(page.status || "draft")}</td>
+        <td>${escapeHtml(page.displayOrder || 0)}</td>
+        <td>${escapeHtml(formatDate(page.updatedAt))}</td>
+        <td class="admin-actions">
+          <button type="button" data-artist-edit-portfolio-page="${attr(page.id)}">Edit</button>
+          <a href="/artist/preview/" target="_blank" rel="noopener">Preview</a>
+          ${reviewButton("portfolio-page", page)}
+        </td>
+      </tr>
+      ${page.adminReviewNote ? `
+        <tr class="review-feedback-row">
+          <td colspan="6">${reviewNoteHtml(page)}</td>
+        </tr>
+      ` : ""}
+    `).join("") : '<tr><td colspan="6">No managed portfolio pages yet.</td></tr>';
+
+    renderPortfolioPageForm(pages[0] || {});
+  }
+
   function renderMedia() {
     const warning = document.getElementById("artist-media-limit-warning");
     if (warning) {
@@ -888,6 +955,7 @@
     renderBilling();
     renderGalleries();
     renderArtwork();
+    renderPortfolioPages();
     renderMedia();
     renderInquiries();
   }
@@ -920,6 +988,19 @@
   async function saveArtwork(form) {
     const id = form.dataset.artworkId;
     const payload = await api(`/artist/api/artwork/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify(formData(form))
+    });
+    if (payload.content) {
+      applyContent(payload.content);
+      renderAll();
+    }
+    showMessage(payload.ok ? "success" : "error", payload.message || "Save failed.", payload.errors);
+  }
+
+  async function savePortfolioPage(form) {
+    const id = form.dataset.portfolioPageId || "new";
+    const payload = await api(`/artist/api/portfolio-pages/${encodeURIComponent(id)}`, {
       method: "POST",
       body: JSON.stringify(formData(form))
     });
@@ -1021,6 +1102,7 @@
     document.addEventListener("click", (event) => {
       const galleryEdit = event.target.closest("[data-artist-edit-gallery]");
       const artworkEdit = event.target.closest("[data-artist-edit-artwork]");
+      const portfolioPageEdit = event.target.closest("[data-artist-edit-portfolio-page]");
       const inquiryView = event.target.closest("[data-artist-view-inquiry]");
       const reviewSubmit = event.target.closest("[data-submit-review-type]");
       const notificationRead = event.target.closest("[data-artist-read-notification]");
@@ -1034,6 +1116,10 @@
 
       if (artworkEdit) {
         renderArtworkForm(state.artwork.find((artwork) => artwork.id === artworkEdit.dataset.artistEditArtwork));
+      }
+
+      if (portfolioPageEdit) {
+        renderPortfolioPageForm(state.portfolioPages.find((page) => page.id === portfolioPageEdit.dataset.artistEditPortfolioPage));
       }
 
       if (inquiryView) {
@@ -1059,6 +1145,10 @@
       if (copyPublicUrl) {
         copyValue(copyPublicUrl.dataset.copyPublicUrl);
       }
+
+      if (event.target.id === "artist-add-portfolio-page") {
+        renderPortfolioPageForm({});
+      }
     });
 
     document.addEventListener("change", (event) => {
@@ -1082,6 +1172,7 @@
     const profileForm = document.getElementById("artist-profile-form");
     const galleryForm = document.getElementById("artist-gallery-form");
     const artworkForm = document.getElementById("artist-artwork-form");
+    const portfolioPageForm = document.getElementById("artist-portfolio-page-form");
     const mediaUploadForm = document.getElementById("artist-media-upload-form");
 
     profileForm?.addEventListener("submit", (event) => {
@@ -1097,6 +1188,11 @@
     artworkForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       saveArtwork(artworkForm);
+    });
+
+    portfolioPageForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      savePortfolioPage(portfolioPageForm);
     });
 
     mediaUploadForm?.addEventListener("submit", (event) => {

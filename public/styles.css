@@ -1680,6 +1680,34 @@ a {
   margin: 0 0 28px;
 }
 
+.managed-portfolio-page {
+  background: #17130f;
+}
+
+.managed-portfolio-page .section-inner {
+  display: grid;
+  gap: 24px;
+}
+
+.managed-portfolio-copy {
+  max-width: 760px;
+  color: #eee4d3;
+  font-size: clamp(1rem, 2vw, 1.16rem);
+  line-height: 1.75;
+}
+
+.managed-portfolio-copy p {
+  margin: 0 0 1rem;
+}
+
+.managed-portfolio-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.portfolio-page-grid {
+  margin-top: 4px;
+}
+
 .dynamic-artwork-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));

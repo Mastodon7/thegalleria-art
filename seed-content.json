@@ -509,6 +509,42 @@
       "updatedAt": "2026-07-14T00:00:00.000Z"
     }
   ],
+  "portfolioPages": [
+    {
+      "id": "portfolio-page-maya-studio-notes-demo",
+      "artistId": "artist-maya-rivers",
+      "galleryId": "gallery-maya-urban-echoes",
+      "title": "Studio Notes: Urban Echoes",
+      "subtitle": "A draft managed portfolio page for testing the page builder workflow.",
+      "pageType": "artist_statement",
+      "displayOrder": 1,
+      "status": "draft",
+      "featuredImage": "/images/maya-urban-echoes.svg",
+      "bodyContent": "This draft page demonstrates how an artist can prepare a managed portfolio page before submitting it for review.\n\nThe page is connected to the existing Maya Rivers demo profile and remains unpublished until an admin approves or publishes it.",
+      "artworkIds": [
+        "artwork-maya-crosswalk-memory",
+        "artwork-maya-gold-hour-window"
+      ],
+      "mediaIds": [],
+      "location": "Chicago, Illinois",
+      "year": "2026",
+      "medium": "Mixed media and digital collage",
+      "dimensions": "",
+      "clientInfo": "",
+      "ctaLabel": "",
+      "ctaUrl": "",
+      "seoTitle": "",
+      "seoDescription": "",
+      "artistReviewNote": "",
+      "adminReviewNote": "",
+      "submittedAt": "",
+      "publishedAt": "",
+      "protected": false,
+      "demo": true,
+      "createdAt": "2026-07-14T00:00:00.000Z",
+      "updatedAt": "2026-07-14T00:00:00.000Z"
+    }
+  ],
   "media": [],
   "inquiries": [],
   "notifications": [],
