@@ -76,6 +76,21 @@
     return artist?.canonicalPath || `/${artist?.slug || ""}/`;
   }
 
+  function publicGalleryUrl(gallery) {
+    const artist = artistById(gallery?.artistId);
+    return gallery?.canonicalPath || `/${artist?.slug || ""}/${gallery?.slug || ""}/`;
+  }
+
+  function absoluteUrl(pathname) {
+    if (!pathname) {
+      return "";
+    }
+    if (/^https?:\/\//.test(pathname)) {
+      return pathname;
+    }
+    return `${window.location.origin}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+  }
+
   function previewArtistUrl(artist) {
     return artist?.id ? `/admin/preview/artist/${encodeURIComponent(artist.id)}/` : "";
   }
@@ -332,6 +347,17 @@
     }
 
     return `<a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview</a>`;
+  }
+
+  function publicGalleryLinkHtml(gallery) {
+    if (!gallery) {
+      return '<span class="admin-muted">No gallery record</span>';
+    }
+    const artist = artistById(gallery.artistId);
+    if (gallery.status === "published" && artist?.status === "published") {
+      return `<a href="${attr(publicGalleryUrl(gallery))}" target="_blank" rel="noopener">View Public Gallery</a>`;
+    }
+    return artist ? `<a href="${attr(previewArtistUrl(artist))}" target="_blank" rel="noopener">Preview Artist Page</a>` : '<span class="admin-muted">No public page yet</span>';
   }
 
   function recentForArtist(items, artistId, predicate) {
@@ -719,6 +745,7 @@
     const recentMedia = recentForArtist(state.media, row.artist.id, (media, id) => media.ownerArtistId === id);
     const recentAudit = recentForArtist(state.auditLog, row.artist.id, (event, id) => event.targetId === id || (String(event.action || "").includes("support") && event.targetId === id));
     const invitationStatus = row.invitation?.status || row.artist.invitationStatus || "none";
+    const customDomainEligible = Boolean(row.plan?.customDomainEligible);
 
     panel.innerHTML = `
       <div class="user-detail-grid">
@@ -747,6 +774,14 @@
           <h3>${escapeHtml(invitationStatus)}</h3>
           <p>Last login: ${escapeHtml(formatDateTime(row.account?.lastLoginAt) || "Never")}</p>
           <p>Created: ${escapeHtml(formatDate(row.account?.createdAt || row.artist.createdAt) || "-")}</p>
+        </article>
+        <article class="inquiry-detail-card">
+          <p class="section-kicker">Domain Readiness</p>
+          <h3>${escapeHtml(row.artist.customDomain || "No custom domain")}</h3>
+          <p>${badge(row.artist.domainStatus || "not_configured")} ${badge(row.artist.sslStatus || "not_configured")}</p>
+          <p>${customDomainEligible ? "Plan eligible for future custom domain setup." : "Current plan is not custom-domain eligible."}</p>
+          <p>Verification token: ${escapeHtml(row.artist.domainVerificationToken || "Not generated")}</p>
+          <p class="admin-muted">DNS and Coolify changes are managed manually by The Galleria.Art support.</p>
         </article>
       </div>
 
@@ -987,10 +1022,16 @@
     }
 
     const planOptions = state.plans.map((plan) => ({ value: plan.id, label: plan.name }));
+    const publicUrl = artist.id ? absoluteUrl(publicArtistUrl(artist)) : "Saved artists receive a public URL.";
     form.innerHTML = `
       <input name="id" type="hidden" value="${attr(artist.id)}">
       ${field("name", "Name", artist.name)}
       ${field("slug", "Slug", artist.slug)}
+      <label>
+        <span>Public URL</span>
+        <input name="publicUrlDisplay" type="text" value="${attr(publicUrl)}" disabled>
+      </label>
+      ${field("customUrlLabel", "Custom URL Label", artist.customUrlLabel)}
       ${field("professionalTitle", "Professional Title", artist.professionalTitle)}
       ${field("city", "City", artist.city)}
       ${field("region", "State / Region", artist.region)}
@@ -1020,6 +1061,24 @@
       ${checkbox("featured", "Featured", artist.featured)}
       ${textarea("shortDescription", "Short Description", artist.shortDescription)}
       ${textarea("bio", "Long Bio / Artist Statement", artist.bio)}
+      ${field("seoTitle", "SEO Title", artist.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", artist.seoDescription)}
+      ${field("socialTitle", "Social Share Title", artist.socialTitle)}
+      ${textarea("socialDescription", "Social Share Description", artist.socialDescription)}
+      ${imageField("socialImage", "Social Share Image", artist.socialImage || artist.heroImage)}
+      ${field("canonicalUrlOverride", "Canonical URL Override", artist.canonicalUrlOverride)}
+      ${checkbox("noindex", "Noindex Public Page", artist.noindex)}
+      ${field("customDomain", "Custom Domain", artist.customDomain)}
+      ${select("domainStatus", "Domain Status", artist.domainStatus || "not_configured", [
+        { value: "not_configured", label: "not configured" },
+        { value: "pending_verification", label: "pending verification" },
+        { value: "verified", label: "verified" },
+        { value: "active", label: "active" },
+        { value: "error", label: "error" }
+      ])}
+      ${field("domainVerificationToken", "Verification Token", artist.domainVerificationToken)}
+      ${field("domainVerifiedAt", "Verified Date", artist.domainVerifiedAt)}
+      ${field("sslStatus", "SSL Status", artist.sslStatus || "not_configured")}
     `;
   }
 
@@ -1051,11 +1110,11 @@
         <td>${Number(usage.galleries || 0)} galleries (${Number(usage.publishedGalleries || 0)} published)<br>${Number(usage.artwork || 0)} artwork (${Number(usage.publishedArtwork || 0)} published)<br>${Number(usage.media || 0)} media<br>${Number(usage.storageMb || 0)} MB${evaluation.warnings?.length ? `<br><strong>${escapeHtml(evaluation.warnings[0])}</strong>` : ""}</td>
         <td>${escapeHtml(profileCompleteness(artist))}</td>
         <td>${escapeHtml(formatDate(acceptedOrLogin))}</td>
-        <td>${artist.status === "published" ? `<a href="${publicArtistUrl(artist)}">${publicArtistUrl(artist)}</a>` : "Not public"}</td>
+        <td>${publicLinkHtml(artist)}<br><button type="button" data-copy-path="${attr(absoluteUrl(publicArtistUrl(artist)))}">Copy URL</button></td>
         <td>${formatDate(artist.updatedAt)}</td>
         <td class="admin-actions">
           <button type="button" data-edit-artist="${attr(artist.id)}">Edit</button>
-          <a href="${publicArtistUrl(artist)}">View Public Page</a>
+          ${publicLinkHtml(artist)}
           <button type="button" data-archive-artist="${attr(artist.id)}"${artist.protected ? " disabled title=\"Seed record is protected\"" : ""}>Archive</button>
         </td>
       </tr>
@@ -1072,16 +1131,29 @@
     }
 
     const artistOptions = state.artists.map((artist) => ({ value: artist.id, label: artist.name }));
+    const publicUrl = gallery.id ? absoluteUrl(publicGalleryUrl(gallery)) : "Saved galleries receive a public URL.";
     form.innerHTML = `
       <input name="id" type="hidden" value="${attr(gallery.id)}">
       ${field("title", "Gallery Title", gallery.title)}
       ${field("slug", "Gallery Slug", gallery.slug)}
+      <label>
+        <span>Public URL</span>
+        <input name="publicUrlDisplay" type="text" value="${attr(publicUrl)}" disabled>
+      </label>
+      ${field("customUrlLabel", "Custom URL Label", gallery.customUrlLabel)}
       ${select("artistId", "Associated Artist", gallery.artistId || artistOptions[0]?.value || "", artistOptions)}
       ${imageField("coverImage", "Cover Image", gallery.coverImage)}
       ${select("status", "Status", gallery.status || "draft", statusOptions.map((item) => ({ value: item, label: item })))}
       ${checkbox("featured", "Featured", gallery.featured)}
       ${field("displayOrder", "Display Order", gallery.displayOrder || 0, "number")}
       ${textarea("description", "Short Description", gallery.description)}
+      ${field("seoTitle", "SEO Title", gallery.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", gallery.seoDescription)}
+      ${field("socialTitle", "Social Share Title", gallery.socialTitle)}
+      ${textarea("socialDescription", "Social Share Description", gallery.socialDescription)}
+      ${imageField("socialImage", "Social Share Image", gallery.socialImage || gallery.coverImage)}
+      ${field("canonicalUrlOverride", "Canonical URL Override", gallery.canonicalUrlOverride)}
+      ${checkbox("noindex", "Noindex Public Gallery", gallery.noindex)}
     `;
   }
 
@@ -1101,11 +1173,11 @@
           <td>${badge(gallery.status)}</td>
           <td>${yesNo(gallery.featured)}</td>
           <td>${escapeHtml(gallery.displayOrder)}</td>
-          <td>${gallery.status === "published" && artist ? `<a href="${publicArtistUrl(artist)}">${publicArtistUrl(artist)}</a>` : "Not public"}</td>
+          <td>${publicGalleryLinkHtml(gallery)}<br><button type="button" data-copy-path="${attr(absoluteUrl(publicGalleryUrl(gallery)))}">Copy URL</button></td>
           <td>${formatDate(gallery.updatedAt)}</td>
           <td class="admin-actions">
             <button type="button" data-edit-gallery="${attr(gallery.id)}">Edit</button>
-            ${artist ? `<a href="${publicArtistUrl(artist)}">View Public Gallery</a>` : ""}
+            ${publicGalleryLinkHtml(gallery)}
             <button type="button" data-archive-gallery="${attr(gallery.id)}"${gallery.protected ? " disabled title=\"Seed record is protected\"" : ""}>Archive</button>
           </td>
         </tr>

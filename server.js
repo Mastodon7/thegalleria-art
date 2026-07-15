@@ -49,6 +49,27 @@ const validInquiryStatuses = new Set(["new", "reviewed", "replied", "archived", 
 const validArtistInvitationStatuses = new Set(["pending", "accepted", "expired", "revoked"]);
 const validBillingStatuses = new Set(["trial", "active", "past_due", "canceled", "comped", "legacy", "demo", "not_configured"]);
 const validSubscriptionStatuses = new Set(["trialing", "active", "past_due", "canceled", "incomplete", "none", "not_configured"]);
+const validDomainStatuses = new Set(["not_configured", "pending_verification", "verified", "active", "error"]);
+const reservedPublicSlugs = new Set([
+  "admin",
+  "artist",
+  "artists",
+  "galleries",
+  "login",
+  "invite",
+  "api",
+  "media",
+  "pricing",
+  "about",
+  "contact",
+  "privacy",
+  "terms",
+  "uploads",
+  "password-reset",
+  "sitemap.xml",
+  "robots.txt",
+  "gallery-data.js"
+]);
 const stripeWebhookEvents = [
   "checkout.session.completed",
   "customer.subscription.created",
@@ -263,7 +284,8 @@ function normalizeContent(content) {
     adminAccounts: Array.isArray(content.adminAccounts) ? content.adminAccounts : [],
     auditLog: Array.isArray(content.auditLog) ? content.auditLog : [],
     statusHistory: Array.isArray(content.statusHistory) ? content.statusHistory : [],
-    artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : []
+    artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : [],
+    redirects: Array.isArray(content.redirects) ? content.redirects : []
   };
 }
 
@@ -292,7 +314,7 @@ function writeContent(content, options = {}) {
 function mergeMissingSeedRecords(content, seed) {
   let changed = false;
 
-  ["artists", "plans", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "billingEvents", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts"].forEach((collection) => {
+  ["artists", "plans", "galleries", "artwork", "media", "inquiries", "invitations", "notifications", "billingEvents", "emailLog", "passwordResetTokens", "adminAccounts", "auditLog", "statusHistory", "artistAccounts", "redirects"].forEach((collection) => {
     (seed[collection] || []).forEach((seedRecord) => {
       if (!content[collection].some((record) => record.id === seedRecord.id)) {
         content[collection].push(clone(seedRecord));
@@ -331,6 +353,70 @@ function ensurePhase16Defaults(content) {
     ].forEach(([key, value]) => {
       if (artist[key] === undefined) {
         artist[key] = value;
+        changed = true;
+      }
+    });
+  });
+
+  return changed;
+}
+
+function ensurePhase18Defaults(content) {
+  let changed = false;
+
+  content.artists.forEach((artist) => {
+    const slug = normalizeSlug(artist.slug);
+    if (slug && artist.slug !== slug) {
+      artist.slug = slug;
+      changed = true;
+    }
+    const canonicalPath = artist.slug === "carolyn-elaine" ? "/carolyn-elaine/" : `/${artist.slug}/`;
+    [
+      ["publicPath", canonicalPath],
+      ["canonicalPath", canonicalPath],
+      ["customUrlLabel", ""],
+      ["seoTitle", ""],
+      ["seoDescription", ""],
+      ["socialTitle", ""],
+      ["socialDescription", ""],
+      ["socialImage", ""],
+      ["canonicalUrlOverride", ""],
+      ["noindex", false],
+      ["customDomain", ""],
+      ["domainStatus", "not_configured"],
+      ["domainVerificationToken", ""],
+      ["domainVerifiedAt", ""],
+      ["sslStatus", "not_configured"]
+    ].forEach(([key, value]) => {
+      if (artist[key] === undefined) {
+        artist[key] = value;
+        changed = true;
+      }
+    });
+  });
+
+  content.galleries.forEach((gallery) => {
+    const artist = content.artists.find((item) => item.id === gallery.artistId);
+    const slug = normalizeSlug(gallery.slug);
+    if (slug && gallery.slug !== slug) {
+      gallery.slug = slug;
+      changed = true;
+    }
+    const canonicalPath = artist && gallery.slug ? `/${artist.slug}/${gallery.slug}/` : "";
+    [
+      ["publicPath", canonicalPath],
+      ["canonicalPath", canonicalPath],
+      ["customUrlLabel", ""],
+      ["seoTitle", ""],
+      ["seoDescription", ""],
+      ["socialTitle", ""],
+      ["socialDescription", ""],
+      ["socialImage", ""],
+      ["canonicalUrlOverride", ""],
+      ["noindex", false]
+    ].forEach(([key, value]) => {
+      if (gallery[key] === undefined) {
+        gallery[key] = value;
         changed = true;
       }
     });
@@ -383,7 +469,8 @@ function ensureContentStore() {
   const mergedSeed = mergeMissingSeedRecords(content, seed);
   const generatedInvitations = ensureInvitationTokens(content);
   const phase16Defaults = ensurePhase16Defaults(content);
-  const changed = mergedSeed || generatedInvitations || phase16Defaults;
+  const phase18Defaults = ensurePhase18Defaults(content);
+  const changed = mergedSeed || generatedInvitations || phase16Defaults || phase18Defaults;
   if (changed) {
     writeContent(content, { backup: true, reason: "seed-merge" });
   }
@@ -1038,6 +1125,11 @@ function publicRecord(record) {
     customMediaLimit,
     customStorageLimit,
     limitOverrideNotes,
+    customDomain,
+    domainStatus,
+    domainVerificationToken,
+    domainVerifiedAt,
+    sslStatus,
     ...safeRecord
   } = record || {};
 
@@ -1119,26 +1211,95 @@ function previewContentWithArtist(content, artist) {
 }
 
 function publicPathForArtist(artist) {
-  return artist.canonicalPath || `/${artist.slug}/`;
+  return artist.publicPath || artist.canonicalPath || `/${artist.slug}/`;
 }
 
-function findPublishedArtistForPath(content, pathname) {
+function findRedirectForPath(content, pathname) {
+  const normalizedPath = normalizePublicPath(pathname);
+  return content.redirects.find((redirect) =>
+    redirect.status === "active" &&
+    redirect.oldPath === normalizedPath &&
+    !pathUsesReservedSlug(redirect.newPath)
+  ) || null;
+}
+
+function sendRedirectForPath(response, pathname) {
+  const redirectRecord = findRedirectForPath(loadContent(), pathname);
+  if (!redirectRecord) {
+    return false;
+  }
+
+  redirect(response, redirectRecord.newPath, 301);
+  return true;
+}
+
+function findPublishedArtistForPath(content, pathname, options = {}) {
   const artistPathMatch = pathname.match(/^\/artists\/([^/]+)\/?$/);
   const rootSlugMatch = pathname.match(/^\/([^/]+)\/?$/);
   const slug = artistPathMatch?.[1] || rootSlugMatch?.[1];
 
-  if (!slug || ["about", "admin", "artist", "contact", "privacy", "terms", "uploads"].includes(slug)) {
+  if (!slug || isReservedPublicSlug(slug)) {
     return null;
   }
 
   return content.artists.find((artist) =>
     artist.status === "published" &&
     artist.slug === slug &&
-    artist.slug !== "carolyn-elaine"
+    (options.includeCarolyn || artist.slug !== "carolyn-elaine")
   ) || null;
 }
 
-function renderPublicArtistPage(artist) {
+function findPublishedGalleryForPath(content, pathname) {
+  const match = pathname.match(/^\/([^/]+)\/([^/]+)\/?$/);
+  if (!match || isReservedPublicSlug(match[1]) || isReservedPublicSlug(match[2])) {
+    return null;
+  }
+
+  const artist = content.artists.find((item) => item.status === "published" && item.slug === match[1]);
+  if (!artist) {
+    return null;
+  }
+
+  const gallery = content.galleries.find((item) =>
+    item.artistId === artist.id &&
+    item.status === "published" &&
+    item.slug === match[2]
+  );
+
+  return gallery ? { artist, gallery } : null;
+}
+
+function publicContentWithGallery(content, artist, gallery) {
+  return {
+    ...optimizeArtistForPublic(content, artist),
+    galleries: [{
+      ...optimizeGalleryForPublic(content, gallery),
+      artworks: content.artwork
+        .filter((artwork) => artwork.galleryId === gallery.id && artwork.status === "published")
+        .sort(sortByDisplayOrder)
+        .map((artwork) => optimizeArtworkForPublic(content, artwork))
+    }]
+  };
+}
+
+function metadataForArtist(content, artist, heroImage, options = {}) {
+  const canonicalPath = options.gallery ? publicPathForGallery(artist, options.gallery) : publicPathForArtist(artist);
+  const record = options.gallery || artist;
+  const baseTitle = options.gallery ? `${options.gallery.title} by ${artist.name}` : artist.name;
+  const fallbackDescription = options.gallery?.description || artist.shortDescription || `${artist.name} at The Galleria.Art`;
+  const shareImage = metaImageForRecord(content, record, [options.gallery?.coverImage, artist.heroImage, heroImage]);
+  return {
+    title: cleanString(record.seoTitle) || `${baseTitle} | The Galleria.Art`,
+    description: cleanString(record.seoDescription) || fallbackDescription,
+    canonicalUrl: publicRecordCanonicalUrl(record, canonicalPath),
+    ogTitle: cleanString(record.socialTitle) || cleanString(record.seoTitle) || baseTitle,
+    ogDescription: cleanString(record.socialDescription) || cleanString(record.seoDescription) || fallbackDescription,
+    ogImage: absoluteUrl(shareImage),
+    noindex: parseBoolean(record.noindex) || Boolean(options.noindex)
+  };
+}
+
+function renderPublicArtistPage(artist, options = {}) {
   const galleries = artist.galleries || [];
   const primaryGallery = galleries[0] || {};
   const artworks = galleries.flatMap((gallery) =>
@@ -1146,24 +1307,30 @@ function renderPublicArtistPage(artist) {
   );
   const heroImage = primaryGallery.coverImage || artist.heroImage || artworks[0]?.image || "";
   const location = [artist.city, artist.region, artist.country].filter(Boolean).join(", ");
-  const canonicalUrl = absoluteUrl(publicPathForArtist(artist));
-  const description = artist.shortDescription || `${artist.name} at The Galleria.Art`;
-  const shareImage = heroImage ? absoluteUrl(heroImage) : absoluteUrl("/images/whispers-main.jpeg");
+  const metadata = metadataForArtist(loadContent(), artist, heroImage, {
+    gallery: options.gallery || null,
+    noindex: options.noindex
+  });
+  const inquirySourcePath = options.gallery ? publicPathForGallery(artist, options.gallery) : publicPathForArtist(artist);
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="${escapeHtml(description)}">
-  <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
-  <meta property="og:title" content="${escapeHtml(`${artist.name} | The Galleria.Art`)}">
-  <meta property="og:description" content="${escapeHtml(description)}">
-  <meta property="og:url" content="${escapeHtml(canonicalUrl)}">
+  ${metadata.noindex ? '<meta name="robots" content="noindex, nofollow">' : ""}
+  <meta name="description" content="${escapeHtml(metadata.description)}">
+  <link rel="canonical" href="${escapeHtml(metadata.canonicalUrl)}">
+  <meta property="og:title" content="${escapeHtml(metadata.ogTitle)}">
+  <meta property="og:description" content="${escapeHtml(metadata.ogDescription)}">
+  <meta property="og:url" content="${escapeHtml(metadata.canonicalUrl)}">
   <meta property="og:type" content="profile">
-  <meta property="og:image" content="${escapeHtml(shareImage)}">
+  <meta property="og:image" content="${escapeHtml(metadata.ogImage)}">
   <meta name="twitter:card" content="summary_large_image">
-  <title>${escapeHtml(artist.name)} | The Galleria.Art</title>
+  <meta name="twitter:title" content="${escapeHtml(metadata.ogTitle)}">
+  <meta name="twitter:description" content="${escapeHtml(metadata.ogDescription)}">
+  <meta name="twitter:image" content="${escapeHtml(metadata.ogImage)}">
+  <title>${escapeHtml(metadata.title)}</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="home-page public-artist-page">
@@ -1222,7 +1389,7 @@ function renderPublicArtistPage(artist) {
           <input name="inquiryType" type="hidden" value="artist">
           <input name="artistId" type="hidden" value="${escapeHtml(artist.id)}">
           <input name="galleryId" type="hidden" value="${escapeHtml(primaryGallery.id || "")}">
-          <input name="sourceUrl" type="hidden" value="${escapeHtml(publicPathForArtist(artist))}">
+          <input name="sourceUrl" type="hidden" value="${escapeHtml(inquirySourcePath)}">
           <label>
             <span>Name</span>
             <input name="name" autocomplete="name" required>
@@ -1311,6 +1478,23 @@ function sendPublicArtistPage(response, pathname) {
 
   response.writeHead(200, secureHeaders({ "Content-Type": "text/html; charset=utf-8" }));
   response.end(injectAnalytics(renderPublicArtistPage(publicArtist)));
+  return true;
+}
+
+function sendPublicGalleryPage(response, pathname) {
+  const content = loadContent();
+  const match = findPublishedGalleryForPath(content, pathname);
+  if (!match) {
+    return false;
+  }
+
+  const publicArtist = publicContentWithGallery(content, match.artist, match.gallery);
+  if (!publicArtist.galleries[0]?.artworks?.length) {
+    return false;
+  }
+
+  response.writeHead(200, secureHeaders({ "Content-Type": "text/html; charset=utf-8" }));
+  response.end(injectAnalytics(renderPublicArtistPage(publicArtist, { gallery: publicArtist.galleries[0] })));
   return true;
 }
 
@@ -1418,25 +1602,34 @@ function sendPricingPage(response) {
 
 function sitemapUrls() {
   const content = loadContent();
-  const urls = new Set([
-    "/",
-    "/about/",
-    "/contact/",
-    "/pricing/",
-    "/privacy/",
-    "/terms/",
-    "/carolyn-elaine/"
-  ]);
+  const urls = [
+    { loc: absoluteUrl("/"), lastmod: "" },
+    { loc: absoluteUrl("/about/"), lastmod: "" },
+    { loc: absoluteUrl("/contact/"), lastmod: "" },
+    { loc: absoluteUrl("/pricing/"), lastmod: "" },
+    { loc: absoluteUrl("/privacy/"), lastmod: "" },
+    { loc: absoluteUrl("/terms/"), lastmod: "" },
+    { loc: absoluteUrl("/carolyn-elaine/"), lastmod: "" }
+  ];
 
-  buildPublicData(content).artists.forEach((artist) => {
-    urls.add(publicPathForArtist(artist));
+  buildPublicData(content).artists
+    .filter((artist) => !parseBoolean(artist.noindex))
+    .forEach((artist) => {
+      urls.push({ loc: publicRecordCanonicalUrl(artist, publicPathForArtist(artist)), lastmod: artist.updatedAt || "" });
+      (artist.galleries || [])
+        .filter((gallery) => !parseBoolean(gallery.noindex))
+        .forEach((gallery) => {
+          urls.push({ loc: publicRecordCanonicalUrl(gallery, publicPathForGallery(artist, gallery)), lastmod: gallery.updatedAt || "" });
+        });
   });
 
-  return [...urls].sort().map((pathname) => absoluteUrl(pathname));
+  return urls
+    .filter((url, index, all) => all.findIndex((item) => item.loc === url.loc) === index)
+    .sort((left, right) => left.loc.localeCompare(right.loc));
 }
 
 function sendSitemap(response) {
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapUrls().map((url) => `  <url><loc>${escapeHtml(url)}</loc></url>`).join("\n")}\n</urlset>\n`;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapUrls().map((url) => `  <url><loc>${escapeHtml(url.loc)}</loc>${url.lastmod ? `<lastmod>${escapeHtml(url.lastmod.slice(0, 10))}</lastmod>` : ""}</url>`).join("\n")}\n</urlset>\n`;
   response.writeHead(200, secureHeaders({ "Content-Type": "application/xml; charset=utf-8" }));
   response.end(xml);
 }
@@ -2282,14 +2475,132 @@ function publicArtistUrl(artist) {
   return artist.canonicalPath || `/${artist.slug}/`;
 }
 
+function normalizeSlug(value) {
+  return cleanString(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+function isReservedPublicSlug(slug) {
+  return reservedPublicSlugs.has(normalizeSlug(slug));
+}
+
+function publicPathForGallery(artist, gallery) {
+  return gallery?.canonicalPath || `/${artist?.slug || ""}/${gallery?.slug || ""}/`;
+}
+
+function publicRecordCanonicalUrl(record, pathname) {
+  const override = cleanString(record?.canonicalUrlOverride);
+  if (!override) {
+    return absoluteUrl(pathname);
+  }
+  return override.startsWith("/") ? absoluteUrl(override) : override;
+}
+
+function cleanDomain(value) {
+  return cleanString(value)
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+}
+
+function isValidDomain(value) {
+  const domain = cleanDomain(value);
+  return !domain || /^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain);
+}
+
+function canUseImageForMeta(content, value, fallbacks = []) {
+  const image = cleanString(value);
+  if (!image) {
+    return true;
+  }
+
+  const media = findMediaByPath(content, image);
+  if (media) {
+    return media.status === "ready";
+  }
+
+  return image.startsWith("/images/") || fallbacks.includes(image);
+}
+
+function metaImageForRecord(content, record, fallbacks = []) {
+  const candidates = [
+    record?.socialImage,
+    record?.coverImage,
+    record?.heroImage,
+    ...fallbacks,
+    "/images/whispers-main.jpeg"
+  ].filter(Boolean);
+  const selected = candidates.find((candidate) => canUseImageForMeta(content, candidate, fallbacks));
+  return selected ? resolveImagePath(content, selected, "large") : "/images/whispers-main.jpeg";
+}
+
+function maybeCreateRedirect(content, oldPath, newPath, recordType, recordId, actorId = adminEmail) {
+  const cleanOldPath = normalizePublicPath(oldPath);
+  const cleanNewPath = normalizePublicPath(newPath);
+  if (!cleanOldPath || !cleanNewPath || cleanOldPath === cleanNewPath || pathUsesReservedSlug(cleanOldPath)) {
+    return null;
+  }
+
+  const existing = content.redirects.find((redirect) => redirect.oldPath === cleanOldPath);
+  if (existing) {
+    existing.newPath = cleanNewPath;
+    existing.status = "active";
+    existing.updatedAt = nowIso();
+    return existing;
+  }
+
+  const redirectRecord = {
+    id: generateId("redirect"),
+    oldPath: cleanOldPath,
+    newPath: cleanNewPath,
+    recordType,
+    recordId,
+    status: "active",
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+  content.redirects.push(redirectRecord);
+  addAuditEvent(content, {
+    actorType: "admin",
+    actorId,
+    action: "redirect.created",
+    targetType: recordType,
+    targetId: recordId,
+    summary: `Redirect created from ${cleanOldPath} to ${cleanNewPath}`
+  });
+  return redirectRecord;
+}
+
+function normalizePublicPath(value) {
+  const raw = cleanString(value);
+  if (!raw || raw.startsWith("http://") || raw.startsWith("https://")) {
+    return "";
+  }
+  const pathOnly = raw.split(/[?#]/)[0];
+  const withLeading = pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`;
+  const withTrailing = withLeading.endsWith("/") ? withLeading : `${withLeading}/`;
+  return withTrailing.replace(/\/{2,}/g, "/");
+}
+
+function pathUsesReservedSlug(pathname) {
+  const firstSegment = normalizePublicPath(pathname).split("/").filter(Boolean)[0] || "";
+  return isReservedPublicSlug(firstSegment);
+}
+
 function validateArtist(input, content, existing) {
   const errors = [];
   const name = cleanString(input.name);
-  const slug = cleanString(input.slug);
+  const slug = normalizeSlug(input.slug);
   const status = cleanString(input.status || "draft");
   const invitationStatus = cleanString(input.invitationStatus || "none");
   const contactEmail = cleanString(input.contactEmail);
   const heroImage = cleanString(input.heroImage);
+  const socialImage = cleanString(input.socialImage || existing?.socialImage);
+  const customDomain = cleanDomain(input.customDomain || existing?.customDomain);
+  const domainStatus = cleanString(input.domainStatus || existing?.domainStatus || "not_configured");
   const planId = cleanString(input.planId || existing?.planId || defaultPlan(content)?.id || "");
   const billingStatus = cleanString(input.billingStatus || existing?.billingStatus || "not_configured");
   const subscriptionStatus = cleanString(input.subscriptionStatus || existing?.subscriptionStatus || "not_configured");
@@ -2301,6 +2612,10 @@ function validateArtist(input, content, existing) {
 
   if (!slug) {
     errors.push("Artist slug is required.");
+  }
+
+  if (slug && isReservedPublicSlug(slug)) {
+    errors.push("Artist slug is reserved.");
   }
 
   if (slug && content.artists.some((artist) => artist.id !== existing?.id && artist.slug === slug)) {
@@ -2335,13 +2650,29 @@ function validateArtist(input, content, existing) {
     errors.push("Hero image must be a ready uploaded image, existing image path, or image URL.");
   }
 
+  if (socialImage && (!isValidImageReference(socialImage) || !canUseImageForMeta(content, socialImage, [heroImage, existing?.heroImage]))) {
+    errors.push("Social image must be a ready uploaded image or existing public image.");
+  }
+
+  if (!validDomainStatuses.has(domainStatus)) {
+    errors.push("Domain status is not valid.");
+  }
+
+  if (!isValidDomain(customDomain)) {
+    errors.push("Custom domain must be a valid domain name.");
+  }
+
+  const canonicalPath = slug === "carolyn-elaine" ? "/carolyn-elaine/" : `/${slug}/`;
+
   return {
     errors,
     record: {
       id: existing?.id || generateId("artist"),
       name,
       slug,
-      canonicalPath: existing?.canonicalPath || (slug === "carolyn-elaine" ? "/carolyn-elaine/" : `/${slug}/`),
+      publicPath: canonicalPath,
+      canonicalPath,
+      customUrlLabel: cleanString(input.customUrlLabel || existing?.customUrlLabel),
       professionalTitle: cleanString(input.professionalTitle),
       city: cleanString(input.city),
       region: cleanString(input.region),
@@ -2354,6 +2685,18 @@ function validateArtist(input, content, existing) {
       contactEmail,
       website: cleanString(input.website),
       socialLinks: parseLinks(input.socialLinks),
+      seoTitle: cleanLimitedString(input.seoTitle || existing?.seoTitle, 90),
+      seoDescription: cleanLimitedString(input.seoDescription || existing?.seoDescription, 180),
+      socialTitle: cleanLimitedString(input.socialTitle || existing?.socialTitle, 90),
+      socialDescription: cleanLimitedString(input.socialDescription || existing?.socialDescription, 220),
+      socialImage,
+      canonicalUrlOverride: cleanString(input.canonicalUrlOverride || existing?.canonicalUrlOverride),
+      noindex: parseBoolean(input.noindex ?? existing?.noindex),
+      customDomain,
+      domainStatus,
+      domainVerificationToken: cleanString(input.domainVerificationToken || existing?.domainVerificationToken || (customDomain ? `galleria-${crypto.randomBytes(8).toString("hex")}` : "")),
+      domainVerifiedAt: domainStatus === "verified" || domainStatus === "active" ? cleanString(input.domainVerifiedAt || existing?.domainVerifiedAt || nowIso()) : "",
+      sslStatus: cleanString(input.sslStatus || existing?.sslStatus || "not_configured"),
       status,
       featured: parseBoolean(input.featured),
       invitationStatus,
@@ -2483,11 +2826,12 @@ function upsertPlan(input, session) {
 function validateGallery(input, content, existing) {
   const errors = [];
   const title = cleanString(input.title);
-  const slug = cleanString(input.slug);
+  const slug = normalizeSlug(input.slug);
   const artistId = cleanString(input.artistId);
   const status = cleanString(input.status || "draft");
   const artist = content.artists.find((item) => item.id === artistId);
   const coverImage = cleanString(input.coverImage);
+  const socialImage = cleanString(input.socialImage || existing?.socialImage);
 
   if (!title) {
     errors.push("Gallery title is required.");
@@ -2495,6 +2839,10 @@ function validateGallery(input, content, existing) {
 
   if (!slug) {
     errors.push("Gallery slug is required.");
+  }
+
+  if (slug && isReservedPublicSlug(slug)) {
+    errors.push("Gallery slug is reserved.");
   }
 
   if (!artist) {
@@ -2513,6 +2861,12 @@ function validateGallery(input, content, existing) {
     errors.push("Cover image must be a ready uploaded image, existing image path, or image URL.");
   }
 
+  if (socialImage && (!isValidImageReference(socialImage) || !canUseImageForMeta(content, socialImage, [coverImage, artist?.heroImage]))) {
+    errors.push("Social image must be a ready uploaded image or existing public image.");
+  }
+
+  const canonicalPath = artist ? `/${artist.slug}/${slug}/` : "";
+
   return {
     errors,
     record: {
@@ -2520,8 +2874,18 @@ function validateGallery(input, content, existing) {
       artistId,
       title,
       slug,
+      publicPath: canonicalPath,
+      canonicalPath,
+      customUrlLabel: cleanString(input.customUrlLabel || existing?.customUrlLabel),
       coverImage,
       description: cleanString(input.description),
+      seoTitle: cleanLimitedString(input.seoTitle || existing?.seoTitle, 90),
+      seoDescription: cleanLimitedString(input.seoDescription || existing?.seoDescription, 180),
+      socialTitle: cleanLimitedString(input.socialTitle || existing?.socialTitle, 90),
+      socialDescription: cleanLimitedString(input.socialDescription || existing?.socialDescription, 220),
+      socialImage,
+      canonicalUrlOverride: cleanString(input.canonicalUrlOverride || existing?.canonicalUrlOverride),
+      noindex: parseBoolean(input.noindex ?? existing?.noindex),
       status,
       featured: parseBoolean(input.featured),
       displayOrder: Number(input.displayOrder || 0),
@@ -2636,11 +3000,78 @@ function upsertRecord(resource, input) {
     }
   }
 
+  const previousArtist = resource === "artist"
+    ? existing
+    : content.artists.find((artist) => artist.id === existing?.artistId);
+  const previousPath = existing && resource === "artist"
+    ? publicPathForArtist(existing)
+    : existing && resource === "gallery"
+      ? publicPathForGallery(previousArtist, existing)
+      : "";
+
   if (existing) {
     const index = collection.findIndex((item) => item.id === existing.id);
     collection[index] = { ...existing, ...record, protected: existing.protected };
   } else {
     collection.push(record);
+  }
+
+  if (existing && resource === "artist" && existing.slug !== record.slug) {
+    maybeCreateRedirect(content, previousPath, publicPathForArtist(record), "artist", record.id);
+    content.galleries
+      .filter((gallery) => gallery.artistId === record.id)
+      .forEach((gallery) => {
+        const oldGalleryPath = `/${existing.slug}/${gallery.slug}/`;
+        gallery.publicPath = `/${record.slug}/${gallery.slug}/`;
+        gallery.canonicalPath = gallery.publicPath;
+        gallery.updatedAt = nowIso();
+        maybeCreateRedirect(content, oldGalleryPath, gallery.publicPath, "gallery", gallery.id);
+      });
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action: "artist.slug.changed",
+      targetType: "artist",
+      targetId: record.id,
+      summary: `Artist slug changed from ${existing.slug} to ${record.slug}`
+    });
+  }
+
+  if (existing && resource === "gallery" && existing.slug !== record.slug) {
+    const artist = content.artists.find((item) => item.id === record.artistId);
+    maybeCreateRedirect(content, previousPath, publicPathForGallery(artist, record), "gallery", record.id);
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action: "gallery.slug.changed",
+      targetType: "gallery",
+      targetId: record.id,
+      summary: `Gallery slug changed from ${existing.slug} to ${record.slug}`
+    });
+  }
+
+  const seoKeys = ["seoTitle", "seoDescription", "socialTitle", "socialDescription", "socialImage", "canonicalUrlOverride", "noindex"];
+  if (existing && ["artist", "gallery"].includes(resource) && seoKeys.some((key) => String(existing[key] || "") !== String(record[key] || ""))) {
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action: `${resource}.seo.updated`,
+      targetType: resource,
+      targetId: record.id,
+      summary: `SEO metadata updated for ${record.name || record.title || record.id}`
+    });
+  }
+
+  const domainKeys = ["customDomain", "domainStatus", "domainVerificationToken", "domainVerifiedAt", "sslStatus"];
+  if (existing && resource === "artist" && domainKeys.some((key) => String(existing[key] || "") !== String(record[key] || ""))) {
+    addAuditEvent(content, {
+      actorType: "admin",
+      actorId: adminEmail,
+      action: existing.domainStatus !== record.domainStatus ? "domain.status.changed" : "domain.fields.updated",
+      targetType: "artist",
+      targetId: record.id,
+      summary: `Domain readiness updated for ${record.name}`
+    });
   }
 
   if (resource === "artist" && existing && (
@@ -4809,9 +5240,23 @@ function updateArtistProfile(context, input) {
   const errors = [];
   const contactEmail = cleanString(input.contactEmail);
   const heroImage = cleanString(input.heroImage);
+  const slug = normalizeSlug(input.slug || artist.slug);
+  const socialImage = cleanString(input.socialImage || artist.socialImage);
 
   if (!cleanString(input.name)) {
     errors.push("Artist name is required.");
+  }
+
+  if (!slug) {
+    errors.push("Public URL slug is required.");
+  }
+
+  if (slug && isReservedPublicSlug(slug)) {
+    errors.push("Public URL slug is reserved.");
+  }
+
+  if (slug && content.artists.some((item) => item.id !== artist.id && item.slug === slug)) {
+    errors.push("Public URL slug is already in use.");
   }
 
   if (!isValidEmail(contactEmail)) {
@@ -4822,12 +5267,22 @@ function updateArtistProfile(context, input) {
     errors.push("Hero image must be a ready uploaded image, existing image path, or image URL.");
   }
 
+  if (socialImage && (!isValidImageReference(socialImage) || !canUseImageForMeta(content, socialImage, [heroImage, artist.heroImage]))) {
+    errors.push("Social image must be a ready uploaded image or existing public image.");
+  }
+
   if (errors.length) {
     return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors };
   }
 
+  const previousSlug = artist.slug;
+  const canonicalPath = slug === "carolyn-elaine" ? "/carolyn-elaine/" : `/${slug}/`;
   Object.assign(artist, {
     name: cleanString(input.name),
+    slug,
+    publicPath: canonicalPath,
+    canonicalPath,
+    customUrlLabel: cleanString(input.customUrlLabel || artist.customUrlLabel),
     professionalTitle: cleanString(input.professionalTitle),
     city: cleanString(input.city),
     region: cleanString(input.region),
@@ -4840,9 +5295,43 @@ function updateArtistProfile(context, input) {
     website: cleanString(input.website),
     contactEmail,
     socialLinks: parseLinks(input.socialLinks),
+    seoTitle: cleanLimitedString(input.seoTitle || artist.seoTitle, 90),
+    seoDescription: cleanLimitedString(input.seoDescription || artist.seoDescription, 180),
+    socialTitle: cleanLimitedString(input.socialTitle || artist.socialTitle, 90),
+    socialDescription: cleanLimitedString(input.socialDescription || artist.socialDescription, 220),
+    socialImage,
+    canonicalUrlOverride: cleanString(input.canonicalUrlOverride || artist.canonicalUrlOverride),
+    noindex: parseBoolean(input.noindex ?? artist.noindex),
     status: ["published", "approved"].includes(artist.status) ? "draft" : artist.status,
     adminReviewNote: "",
     updatedAt: nowIso()
+  });
+
+  if (previousSlug !== artist.slug) {
+    content.galleries
+      .filter((gallery) => gallery.artistId === artist.id)
+      .forEach((gallery) => {
+        gallery.publicPath = `/${artist.slug}/${gallery.slug}/`;
+        gallery.canonicalPath = gallery.publicPath;
+        gallery.updatedAt = nowIso();
+      });
+    addAuditEvent(content, {
+      actorType: context.support?.active ? "admin_support" : "artist",
+      actorId: context.support?.adminEmail || context.account.email,
+      action: "artist.slug.changed",
+      targetType: "artist",
+      targetId: artist.id,
+      summary: `Artist slug changed from ${previousSlug} to ${artist.slug}`
+    });
+  }
+
+  addAuditEvent(content, {
+    actorType: context.support?.active ? "admin_support" : "artist",
+    actorId: context.support?.adminEmail || context.account.email,
+    action: "artist.seo.updated",
+    targetType: "artist",
+    targetId: artist.id,
+    summary: `Artist profile SEO fields updated for ${artist.name}`
   });
 
   const supportActor = supportAuditActor(context);
@@ -4873,23 +5362,73 @@ function updateArtistGallery(context, id, input) {
     errors.push("Gallery title is required.");
   }
 
+  const slug = normalizeSlug(input.slug || gallery.slug);
+  if (!slug) {
+    errors.push("Gallery slug is required.");
+  }
+
+  if (slug && isReservedPublicSlug(slug)) {
+    errors.push("Gallery slug is reserved.");
+  }
+
+  if (slug && content.galleries.some((item) => item.id !== gallery.id && item.artistId === context.artist.id && item.slug === slug)) {
+    errors.push("Gallery slug is already in use.");
+  }
+
   const coverImage = cleanString(input.coverImage);
+  const socialImage = cleanString(input.socialImage || gallery.socialImage);
   if (coverImage && (!isValidImageReference(coverImage) || !isArtistAllowedImageReference(context, coverImage))) {
     errors.push("Cover image must be a ready uploaded image, existing image path, or image URL.");
+  }
+
+  if (socialImage && (!isValidImageReference(socialImage) || !canUseImageForMeta(content, socialImage, [coverImage, context.artist.heroImage]))) {
+    errors.push("Social image must be a ready uploaded image or existing public image.");
   }
 
   if (errors.length) {
     return { ok: false, statusCode: 422, message: "Please fix the highlighted fields.", errors };
   }
 
+  const previousSlug = gallery.slug;
   Object.assign(gallery, {
     title: cleanString(input.title),
+    slug,
+    publicPath: publicPathForGallery(context.artist, { slug }),
+    canonicalPath: publicPathForGallery(context.artist, { slug }),
+    customUrlLabel: cleanString(input.customUrlLabel || gallery.customUrlLabel),
     description: cleanString(input.description),
     coverImage,
+    seoTitle: cleanLimitedString(input.seoTitle || gallery.seoTitle, 90),
+    seoDescription: cleanLimitedString(input.seoDescription || gallery.seoDescription, 180),
+    socialTitle: cleanLimitedString(input.socialTitle || gallery.socialTitle, 90),
+    socialDescription: cleanLimitedString(input.socialDescription || gallery.socialDescription, 220),
+    socialImage,
+    canonicalUrlOverride: cleanString(input.canonicalUrlOverride || gallery.canonicalUrlOverride),
+    noindex: parseBoolean(input.noindex ?? gallery.noindex),
     status: ["published", "approved"].includes(gallery.status) ? "draft" : gallery.status,
     adminReviewNote: "",
     displayOrder: Number(input.displayOrder || 0),
     updatedAt: nowIso()
+  });
+
+  if (previousSlug !== gallery.slug) {
+    addAuditEvent(content, {
+      actorType: context.support?.active ? "admin_support" : "artist",
+      actorId: context.support?.adminEmail || context.account.email,
+      action: "gallery.slug.changed",
+      targetType: "gallery",
+      targetId: gallery.id,
+      summary: `Gallery slug changed from ${previousSlug} to ${gallery.slug}`
+    });
+  }
+
+  addAuditEvent(content, {
+    actorType: context.support?.active ? "admin_support" : "artist",
+    actorId: context.support?.adminEmail || context.account.email,
+    action: "gallery.seo.updated",
+    targetType: "gallery",
+    targetId: gallery.id,
+    summary: `Gallery SEO fields updated for ${gallery.title}`
   });
 
   const supportActor = supportAuditActor(context);
@@ -5347,7 +5886,7 @@ function handleAdminApi(request, response, pathname) {
 }
 
 function sendPreviewPage(response, artist) {
-  sendHtml(response, 200, renderPublicArtistPage(artist).replace("</body>", '<div class="preview-ribbon">Private Preview</div></body>'));
+  sendHtml(response, 200, renderPublicArtistPage(artist, { noindex: true }).replace("</body>", '<div class="preview-ribbon">Private Preview</div></body>'));
 }
 
 function sendAdminPreview(request, response, artistId) {
@@ -5617,6 +6156,14 @@ function handleRequest(request, response) {
 
   if (pathname.startsWith("/artist/") && !pathname.startsWith("/artist/login/")) {
     protectArtistRoute(request, response, pathname);
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "HEAD") && sendRedirectForPath(response, pathname)) {
+    return;
+  }
+
+  if (request.method === "GET" && sendPublicGalleryPage(response, pathname)) {
     return;
   }
 

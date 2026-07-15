@@ -35,6 +35,20 @@
     return state.artist.canonicalPath || `/${state.artist.slug || ""}/`;
   }
 
+  function publicGalleryUrl(gallery) {
+    return gallery?.canonicalPath || `${publicArtistUrl()}${gallery?.slug || ""}/`;
+  }
+
+  function absoluteUrl(pathname) {
+    if (!pathname) {
+      return "";
+    }
+    if (/^https?:\/\//.test(pathname)) {
+      return pathname;
+    }
+    return `${window.location.origin}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+  }
+
   function galleryById(id) {
     return state.galleries.find((gallery) => gallery.id === id);
   }
@@ -479,6 +493,11 @@
 
     form.innerHTML = `
       ${field("name", "Name", state.artist.name)}
+      ${field("slug", "Public URL Slug", state.artist.slug)}
+      <label>
+        <span>Current Public URL</span>
+        <input name="publicUrlDisplay" type="text" value="${attr(absoluteUrl(publicArtistUrl()))}" disabled>
+      </label>
       ${field("professionalTitle", "Professional Title", state.artist.professionalTitle)}
       ${field("city", "City", state.artist.city)}
       ${field("region", "State / Region", state.artist.region)}
@@ -491,6 +510,12 @@
       ${field("socialLinks", "Instagram / Social Link", (state.artist.socialLinks || []).join(", "))}
       ${textarea("shortDescription", "Short Description", state.artist.shortDescription)}
       ${textarea("bio", "Long Bio / Artist Statement", state.artist.bio)}
+      ${field("seoTitle", "SEO Title", state.artist.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", state.artist.seoDescription)}
+      ${field("socialTitle", "Social Share Title", state.artist.socialTitle)}
+      ${textarea("socialDescription", "Social Share Description", state.artist.socialDescription)}
+      ${imageField("socialImage", "Social Share Image", state.artist.socialImage || state.artist.heroImage)}
+      ${field("canonicalUrlOverride", "Canonical URL Override", state.artist.canonicalUrlOverride)}
     `;
   }
 
@@ -505,6 +530,7 @@
       <div class="review-status-actions">
         ${badge(state.artist.status || "draft")}
         <a href="/artist/preview/" target="_blank" rel="noopener">Private Preview</a>
+        <button type="button" data-copy-public-url="${attr(absoluteUrl(publicArtistUrl()))}">Copy Public URL</button>
         ${reviewButton("artist", state.artist)}
       </div>
       ${state.artist.adminReviewNote ? `<div class="review-note-block"><strong>Admin feedback</strong>${reviewNoteHtml(state.artist)}</div>` : ""}
@@ -605,6 +631,12 @@
         ${billingEnabled ? "" : "<p>Online billing is not enabled yet. Please contact The Galleria.Art.</p>"}
       </div>
       ${billing.warnings?.length ? `<div class="review-note-block"><strong>Usage notices</strong>${billing.warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}<p>Need more room? Contact The Galleria.Art and we can adjust the account.</p></div>` : ""}
+      <div class="review-note-block">
+        <strong>Custom Domain</strong>
+        <p>${plan.customDomainEligible ? "Custom domain setup is managed by The Galleria.Art support." : "Custom domains are available on eligible plans. Contact The Galleria.Art to discuss an upgrade."}</p>
+        <p>Status: ${escapeHtml(state.artist.domainStatus || "not_configured")}</p>
+        ${state.artist.customDomain ? `<p>Domain: ${escapeHtml(state.artist.customDomain)}</p>` : ""}
+      </div>
       <div class="review-status-actions">
         <button type="button" data-billing-portal ${billing.portalAvailable ? "" : "disabled"}>Manage Billing</button>
         <a href="/contact/">Contact About Billing</a>
@@ -637,12 +669,21 @@
     form.dataset.galleryId = gallery.id || "";
     form.innerHTML = `
       ${field("title", "Gallery Title", gallery.title)}
-      ${field("slugDisplay", "Slug", gallery.slug)}
+      ${field("slug", "Gallery URL Slug", gallery.slug)}
+      <label>
+        <span>Current Public URL</span>
+        <input name="publicUrlDisplay" type="text" value="${attr(absoluteUrl(publicGalleryUrl(gallery)))}" disabled>
+      </label>
       ${imageField("coverImage", "Cover Image", gallery.coverImage)}
       ${field("displayOrder", "Display Order", gallery.displayOrder || 0, "number")}
       ${textarea("description", "Description", gallery.description)}
+      ${field("seoTitle", "SEO Title", gallery.seoTitle)}
+      ${textarea("seoDescription", "SEO Description", gallery.seoDescription)}
+      ${field("socialTitle", "Social Share Title", gallery.socialTitle)}
+      ${textarea("socialDescription", "Social Share Description", gallery.socialDescription)}
+      ${imageField("socialImage", "Social Share Image", gallery.socialImage || gallery.coverImage)}
+      ${field("canonicalUrlOverride", "Canonical URL Override", gallery.canonicalUrlOverride)}
     `;
-    form.querySelector('[name="slugDisplay"]')?.setAttribute("disabled", "disabled");
   }
 
   function renderGalleries() {
@@ -661,9 +702,10 @@
           <td>${badge(gallery.status)}</td>
           <td>${gallery.featured ? "Yes" : "No"}</td>
           <td>${count}</td>
-          <td>${gallery.status === "published" ? `<a href="${publicArtistUrl()}">${publicArtistUrl()}</a>` : "Not public"}</td>
+          <td>${gallery.status === "published" ? `<a href="${attr(publicGalleryUrl(gallery))}">${escapeHtml(publicGalleryUrl(gallery))}</a>` : "Not public"}</td>
           <td class="admin-actions">
             <button type="button" data-artist-edit-gallery="${attr(gallery.id)}">Edit</button>
+            <button type="button" data-copy-public-url="${attr(absoluteUrl(publicGalleryUrl(gallery)))}">Copy URL</button>
             ${reviewButton("gallery", gallery)}
           </td>
         </tr>
@@ -938,6 +980,15 @@
     showMessage(payload.ok ? "success" : "error", payload.message || "Notification update failed.");
   }
 
+  async function copyValue(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      showMessage("success", "Public URL copied.");
+    } catch (error) {
+      window.prompt("Copy public URL", value);
+    }
+  }
+
   async function startCheckout(planId, interval) {
     const payload = await api("/artist/api/billing/checkout", {
       method: "POST",
@@ -975,6 +1026,7 @@
       const notificationRead = event.target.closest("[data-artist-read-notification]");
       const checkout = event.target.closest("[data-billing-checkout]");
       const portal = event.target.closest("[data-billing-portal]");
+      const copyPublicUrl = event.target.closest("[data-copy-public-url]");
 
       if (galleryEdit) {
         renderGalleryForm(state.galleries.find((gallery) => gallery.id === galleryEdit.dataset.artistEditGallery));
@@ -1002,6 +1054,10 @@
 
       if (portal) {
         openBillingPortal();
+      }
+
+      if (copyPublicUrl) {
+        copyValue(copyPublicUrl.dataset.copyPublicUrl);
       }
     });
 
