@@ -31,11 +31,18 @@
     <section class="slide statement" data-title="Artist Statement">
       <div class="text-panel wide">
         <p class="eyebrow">Artist Statement</p>
-        <h2>Carolyn Elaine</h2>
-        <p>Carolyn Elaine is a Chicago-based public artist whose work explores history, identity, and the stories that connect people to place. Working primarily in mosaic, she creates permanent installations that transform architecture into spaces of reflection, belonging, and cultural memory.</p>
-        <p>Through collaboration with communities, institutions, and design partners, her work celebrates the people, traditions, and histories that shape our shared experience.</p>
-        <h3>Selected Clients</h3>
-        <p class="clients">Partners In Health · Department of Cultural Affairs and Special Events · Brookfield Zoo Chicago · Lauren Rogers Museum of Art · Chicago Public Schools · Oak Park Area Arts Council · Covenant United Church of Christ · St. Elizabeth Parish, Jamaica</p>
+        <div class="artist-statement-layout">
+          <div>
+            <h2>Carolyn Elaine</h2>
+            <p>Carolyn Elaine is a Chicago-based public artist whose work explores history, identity, and the stories that connect people to place. Working primarily in mosaic, she creates permanent installations that transform architecture into spaces of reflection, belonging, and cultural memory.</p>
+            <p>Through collaboration with communities, institutions, and design partners, her work celebrates the people, traditions, and histories that shape our shared experience.</p>
+            <h3>Selected Clients</h3>
+            <p class="clients">Partners In Health · Department of Cultural Affairs and Special Events · Brookfield Zoo Chicago · Lauren Rogers Museum of Art · Chicago Public Schools · Oak Park Area Arts Council · Covenant United Church of Christ · St. Elizabeth Parish, Jamaica</p>
+          </div>
+          <figure class="artist-headshot">
+            <img src="/images/carolyn-elaine-headshot.png" alt="Carolyn Elaine portrait">
+          </figure>
+        </div>
       </div>
     </section>
 
@@ -139,7 +146,7 @@
         <p class="eyebrow">Selected Works</p>
         <h2>Brookfield Zoo Chicago</h2>
         <p class="meta">Brookfield, Illinois · 2013</p>
-        <p>One of six permanent mosaic environments created for Brookfield Zoo, these installations transform everyday visitor spaces into immersive experiences inspired by the natural world.</p>
+        <p>Two of six permanent mosaic environments created for Brookfield Zoo, these installations transform everyday visitor spaces into immersive experiences inspired by the natural world.</p>
         <button class="view-artwork-button lightbox-copy-trigger" type="button" data-lightbox-src="/images/brookfield-1.jpg">Click to Enlarge</button>
       </div>
     </section>
@@ -157,6 +164,12 @@
         <hr>
         <p>This stained-glass mosaic installation surrounds the sanctuary with color, light, and symbolism that reflect themes of faith, unity, and community.</p>
         <button class="view-artwork-button lightbox-copy-trigger" type="button" data-lightbox-src="/images/gathered.jpg">Click to Enlarge</button>
+        <figure>
+          <button class="artwork-trigger" type="button" data-lightbox-title="Where Two or Three Are Gathered, detail" data-lightbox-src="/images/where-two-or-three-detail.jpg" aria-label="Open detail view of Where Two or Three Are Gathered">
+            <img src="/images/where-two-or-three-detail.jpg" alt="Detail view of Where Two or Three Are Gathered">
+          </button>
+          <figcaption>Detail view of the sanctuary mosaic.</figcaption>
+        </figure>
       </div>
     </section>
 
@@ -167,48 +180,6 @@
         <p class="role dark">Public Artist · Chicago, Illinois</p>
         <p><a href="https://studioelainemosaic.com">studioelainemosaic.com</a><br>
         <a href="mailto:carolyn@studioelainemosaic.com">carolyn@studioelainemosaic.com</a></p>
-        <a class="button" href="mailto:carolyn@studioelainemosaic.com?subject=Artwork%20Inquiry">Ask About the Artwork</a>
-        <form class="inquiry-form carolyn-inquiry-form" data-inquiry-form>
-          <input name="inquiryType" type="hidden" value="artist">
-          <input name="artistId" type="hidden" value="artist-carolyn-elaine">
-          <input name="galleryId" type="hidden" value="gallery-carolyn-portfolio">
-          <input name="sourceUrl" type="hidden" value="/carolyn-elaine/">
-          <label>
-            <span>Name</span>
-            <input name="name" autocomplete="name" required>
-          </label>
-          <label>
-            <span>Email</span>
-            <input name="email" type="email" autocomplete="email" required>
-          </label>
-          <label>
-            <span>Phone Optional</span>
-            <input name="phone" autocomplete="tel">
-          </label>
-          <label>
-            <span>Artwork Optional</span>
-            <select name="artworkId" data-inquiry-artwork-select>
-              <option value="">General inquiry about Carolyn Elaine</option>
-              <option value="artwork-whispers-main">Whispers of Ancestral Wisdom</option>
-              <option value="artwork-tears">The Tears of Our Ancestors Irrigate Our Destiny</option>
-              <option value="artwork-light">We Carry the Light</option>
-              <option value="artwork-narrative">Creating Our Own Narrative</option>
-              <option value="artwork-bjs-mom">BJ's Mom</option>
-              <option value="artwork-brookfield-1">Brookfield Zoo Chicago</option>
-              <option value="artwork-gathered">Where Two or Three Are Gathered</option>
-            </select>
-          </label>
-          <label class="admin-field-wide">
-            <span>Message</span>
-            <textarea name="message" maxlength="3000" required></textarea>
-          </label>
-          <label class="inquiry-honeypot" aria-hidden="true">
-            <span>Website</span>
-            <input name="companyWebsite" tabindex="-1" autocomplete="off">
-          </label>
-          <button class="view-artwork-button" type="submit">Send Inquiry</button>
-          <p class="inquiry-feedback" data-inquiry-feedback aria-live="polite"></p>
-        </form>
       </div>
     </section>
   </main>
@@ -239,6 +210,5 @@
   </div>
 
   <script src="/script.js"></script>
-  <script src="/inquiry.js"></script>
 </body>
 </html>

@@ -370,7 +370,7 @@
       "location": "Brookfield, Illinois",
       "medium": "Permanent mosaic environment",
       "dimensions": "",
-      "description": "One of six permanent mosaic environments created for Brookfield Zoo Chicago.",
+      "description": "Two of six permanent mosaic environments created for Brookfield Zoo Chicago.",
       "displayOrder": 7,
       "status": "published",
       "protected": true,
@@ -412,6 +412,24 @@
       "protected": true,
       "createdAt": "2026-07-14T00:00:00.000Z",
       "updatedAt": "2026-07-14T00:00:00.000Z"
+    },
+    {
+      "id": "artwork-gathered-detail",
+      "artistId": "artist-carolyn-elaine",
+      "galleryId": "gallery-carolyn-portfolio",
+      "title": "Where Two or Three Are Gathered, detail",
+      "image": "/images/where-two-or-three-detail.jpg",
+      "alt": "Detail view of Where Two or Three Are Gathered",
+      "year": "2021",
+      "location": "South Holland, Illinois",
+      "medium": "Stained-glass mosaic installation",
+      "dimensions": "",
+      "description": "Detail view of the sanctuary mosaic.",
+      "displayOrder": 10,
+      "status": "published",
+      "protected": true,
+      "createdAt": "2026-07-17T00:00:00.000Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z"
     },
     {
       "id": "artwork-maya-crosswalk-memory",

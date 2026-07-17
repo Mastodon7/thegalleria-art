@@ -472,6 +472,41 @@ function ensurePhase19Defaults(content) {
   return changed;
 }
 
+function ensureCarolynElaineJuly2026Updates(content) {
+  let changed = false;
+  const brookfield = content.artwork.find((item) => item.id === "artwork-brookfield-1");
+
+  if (brookfield && brookfield.description !== "Two of six permanent mosaic environments created for Brookfield Zoo Chicago.") {
+    brookfield.description = "Two of six permanent mosaic environments created for Brookfield Zoo Chicago.";
+    brookfield.updatedAt = "2026-07-17T00:00:00.000Z";
+    changed = true;
+  }
+
+  if (!content.artwork.some((item) => item.id === "artwork-gathered-detail")) {
+    content.artwork.push({
+      id: "artwork-gathered-detail",
+      artistId: "artist-carolyn-elaine",
+      galleryId: "gallery-carolyn-portfolio",
+      title: "Where Two or Three Are Gathered, detail",
+      image: "/images/where-two-or-three-detail.jpg",
+      alt: "Detail view of Where Two or Three Are Gathered",
+      year: "2021",
+      location: "South Holland, Illinois",
+      medium: "Stained-glass mosaic installation",
+      dimensions: "",
+      description: "Detail view of the sanctuary mosaic.",
+      displayOrder: 10,
+      status: "published",
+      protected: true,
+      createdAt: "2026-07-17T00:00:00.000Z",
+      updatedAt: "2026-07-17T00:00:00.000Z"
+    });
+    changed = true;
+  }
+
+  return changed;
+}
+
 function futureIso(days) {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -518,7 +553,8 @@ function ensureContentStore() {
   const phase16Defaults = ensurePhase16Defaults(content);
   const phase18Defaults = ensurePhase18Defaults(content);
   const phase19Defaults = ensurePhase19Defaults(content);
-  const changed = mergedSeed || generatedInvitations || phase16Defaults || phase18Defaults || phase19Defaults;
+  const carolynJuly2026Updates = ensureCarolynElaineJuly2026Updates(content);
+  const changed = mergedSeed || generatedInvitations || phase16Defaults || phase18Defaults || phase19Defaults || carolynJuly2026Updates;
   if (changed) {
     writeContent(content, { backup: true, reason: "seed-merge" });
   }

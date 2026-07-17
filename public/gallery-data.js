@@ -133,7 +133,7 @@ window.GalleriaData = {
               location: "Brookfield, Illinois",
               medium: "Permanent mosaic environment",
               dimensions: "",
-              description: "One of six permanent mosaic environments created for Brookfield Zoo Chicago.",
+              description: "Two of six permanent mosaic environments created for Brookfield Zoo Chicago.",
               displayOrder: 7,
               status: "published"
             },
@@ -165,6 +165,21 @@ window.GalleriaData = {
               dimensions: "",
               description: "A stained-glass mosaic installation reflecting themes of faith, unity, and community.",
               displayOrder: 9,
+              status: "published"
+            },
+            {
+              id: "artwork-gathered-detail",
+              artistId: "artist-carolyn-elaine",
+              galleryId: "gallery-carolyn-portfolio",
+              title: "Where Two or Three Are Gathered, detail",
+              image: "/images/where-two-or-three-detail.jpg",
+              alt: "Detail view of Where Two or Three Are Gathered",
+              year: "2021",
+              location: "South Holland, Illinois",
+              medium: "Stained-glass mosaic installation",
+              dimensions: "",
+              description: "Detail view of the sanctuary mosaic.",
+              displayOrder: 10,
               status: "published"
             }
           ]
