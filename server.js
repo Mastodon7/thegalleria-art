@@ -37,7 +37,7 @@ const stripeCancelUrl = process.env.STRIPE_CANCEL_URL || `${publicSiteUrl}/artis
 const stripePortalReturnUrl = process.env.STRIPE_PORTAL_RETURN_URL || `${publicSiteUrl}/artist/billing/`;
 const passwordSalt = process.env.ADMIN_PASSWORD_SALT || "galleria-admin-bootstrap-v1";
 const passwordHash = process.env.ADMIN_PASSWORD_HASH ||
-  "61a567bd15cf8240b460bb5199b408e73bf6fea3f93d529075a56be811e0b3d9eeb280e43bf340411d87355f2fc85a0dc23765e5644062cdcc875f738ea53ec2";
+  "6cb4828fc608ff299e3271b4a15bcbc5e676e75b8006e73b653d2562b12fe5ba05ef2c7099b348c5e899c5d864b791c8ff3aaecf0cea6dc9fe5f4c4b55490364";
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const adminSessionCookieName = "galleria_admin";
 const artistSessionCookieName = "galleria_artist";
