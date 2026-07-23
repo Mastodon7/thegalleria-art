@@ -298,7 +298,10 @@ function normalizeContent(content) {
     statusHistory: Array.isArray(content.statusHistory) ? content.statusHistory : [],
     artistAccounts: Array.isArray(content.artistAccounts) ? content.artistAccounts : [],
     redirects: Array.isArray(content.redirects) ? content.redirects : [],
-    portfolioPages: Array.isArray(content.portfolioPages) ? content.portfolioPages : []
+    portfolioPages: Array.isArray(content.portfolioPages) ? content.portfolioPages : [],
+    carolynStaticOverrides: (content.carolynStaticOverrides && typeof content.carolynStaticOverrides === "object" && !Array.isArray(content.carolynStaticOverrides))
+      ? content.carolynStaticOverrides
+      : {}
   };
 }
 
@@ -1900,6 +1903,89 @@ function sendFile(response, filePath, statusCode = 200) {
     const contentType = mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream";
     response.writeHead(statusCode, secureHeaders({ "Content-Type": contentType }));
     response.end(shouldInjectAnalytics(filePath) ? injectAnalytics(content.toString("utf8")) : content);
+  });
+}
+
+const carolynStaticPath = path.join(publicDir, "carolyn-elaine", "index.html");
+
+// Applies admin-editable overrides (title / meta line / description paragraph)
+// on top of the preserved static Carolyn Elaine page at render time, so those
+// fields can be updated through /admin/api/carolyn-elaine/overrides without a
+// git push + redeploy. Each artwork block in public/carolyn-elaine/index.html
+// carries a data-artwork-id attribute that keys into these overrides.
+function applyCarolynStaticOverrides(html, overrides) {
+  if (!overrides || typeof overrides !== "object") {
+    return html;
+  }
+
+  Object.keys(overrides).forEach((artworkId) => {
+    const fields = overrides[artworkId];
+    if (!fields) {
+      return;
+    }
+
+    const sectionRegex = new RegExp(
+      `<section[^>]*data-artwork-id="${artworkId}"[\\s\\S]*?<\\/section>`
+    );
+    const match = html.match(sectionRegex);
+    if (!match) {
+      return;
+    }
+
+    let section = match[0];
+    const original = section;
+
+    if (fields.title) {
+      const title = escapeHtml(fields.title);
+      section = section.replace(/data-title="[^"]*"/, `data-title="${title}"`);
+      section = section.replace(/<h2>[\s\S]*?<\/h2>/, `<h2>${title}</h2>`);
+      section = section.replace(/data-lightbox-title="([^"]*)"/g, (m, existing) =>
+        existing.trim().endsWith(", detail")
+          ? `data-lightbox-title="${title}, detail"`
+          : `data-lightbox-title="${title}"`
+      );
+      section = section.replace(/aria-label="Open detail view of [^"]*"/g, `aria-label="Open detail view of ${title}"`);
+      section = section.replace(/aria-label="Open ([^"]*) image (\d+)"/g, (m, _existing, num) => `aria-label="Open ${title} image ${num}"`);
+      section = section.replace(/aria-label="Open ((?!detail view of)[^"]*) image"/g, `aria-label="Open ${title} image"`);
+      section = section.replace(/alt="Detail view of [^"]*"/g, `alt="Detail view of ${title}"`);
+    }
+
+    if (fields.meta) {
+      section = section.replace(/<p class="meta">[\s\S]*?<\/p>/, `<p class="meta">${escapeHtml(fields.meta)}</p>`);
+    }
+
+    if (fields.paragraph) {
+      section = section.replace(
+        /<p>[\s\S]*?<\/p>(\s*<button class="view-artwork-button)/,
+        (m, tail) => `<p>${escapeHtml(fields.paragraph)}</p>${tail}`
+      );
+    }
+
+    html = html.replace(original, section);
+  });
+
+  return html;
+}
+
+function sendCarolynElainePage(response, filePath) {
+  fs.readFile(filePath, "utf8", (error, html) => {
+    if (error) {
+      response.writeHead(error.code === "ENOENT" ? 404 : 500, secureHeaders({
+        "Content-Type": "text/plain; charset=utf-8"
+      }));
+      response.end(error.code === "ENOENT" ? "Not found" : "Server error");
+      return;
+    }
+
+    let rendered = html;
+    try {
+      rendered = applyCarolynStaticOverrides(html, loadContent().carolynStaticOverrides);
+    } catch (overrideError) {
+      rendered = html;
+    }
+
+    response.writeHead(200, secureHeaders({ "Content-Type": "text/html; charset=utf-8" }));
+    response.end(shouldInjectAnalytics(filePath) ? injectAnalytics(rendered) : rendered);
   });
 }
 
@@ -6426,6 +6512,62 @@ function handleAdminApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/admin/api/carolyn-elaine/overrides") {
+    const content = loadContent();
+    sendJson(response, 200, {
+      ok: true,
+      artworkIds: ["whispers", "tears", "light", "narrative", "bjs-mom", "brookfield", "gathered"],
+      overrides: content.carolynStaticOverrides || {}
+    });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/admin/api/carolyn-elaine/overrides") {
+    collectJson(request, response, (input) => {
+      const artworkId = cleanString(input.artworkId || "");
+      const knownIds = ["whispers", "tears", "light", "narrative", "bjs-mom", "brookfield", "gathered"];
+
+      if (!knownIds.includes(artworkId)) {
+        sendJson(response, 400, {
+          ok: false,
+          message: `artworkId must be one of: ${knownIds.join(", ")}`
+        });
+        return;
+      }
+
+      const title = input.title !== undefined ? cleanString(input.title) : undefined;
+      const meta = input.meta !== undefined ? cleanString(input.meta) : undefined;
+      const paragraph = input.paragraph !== undefined ? cleanString(input.paragraph) : undefined;
+
+      if (title === undefined && meta === undefined && paragraph === undefined) {
+        sendJson(response, 400, { ok: false, message: "Provide at least one of: title, meta, paragraph." });
+        return;
+      }
+
+      const content = loadContent();
+      const existing = content.carolynStaticOverrides[artworkId] || {};
+      const next = { ...existing };
+      if (title !== undefined) next.title = title;
+      if (meta !== undefined) next.meta = meta;
+      if (paragraph !== undefined) next.paragraph = paragraph;
+      next.updatedAt = nowIso();
+      content.carolynStaticOverrides[artworkId] = next;
+
+      addAuditEvent(content, {
+        actorType: "admin",
+        actorId: adminSession.email,
+        action: "carolyn-elaine.static-override.save",
+        targetType: "carolyn-static-override",
+        targetId: artworkId,
+        summary: `Updated static page override for ${artworkId}`
+      });
+
+      saveContent(content, "carolyn-static-override");
+      sendJson(response, 200, { ok: true, artworkId, override: next });
+    });
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/admin/api/exports/public.json") {
     sendExportJson(response, "galleria-public-content.json", exportPublicContent(loadContent()));
     return;
@@ -6710,7 +6852,17 @@ function handleStatic(request, response, pathname) {
 
   fs.stat(absolutePath, (error, stats) => {
     if (!error && stats.isDirectory()) {
-      sendFile(response, path.join(absolutePath, "index.html"));
+      const indexPath = path.join(absolutePath, "index.html");
+      if (indexPath === carolynStaticPath) {
+        sendCarolynElainePage(response, indexPath);
+        return;
+      }
+      sendFile(response, indexPath);
+      return;
+    }
+
+    if (absolutePath === carolynStaticPath) {
+      sendCarolynElainePage(response, absolutePath);
       return;
     }
 
